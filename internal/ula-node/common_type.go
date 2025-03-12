@@ -79,7 +79,7 @@ func (rdsp *RealDisplay) Dup() *RealDisplay {
 type PixelSurface struct {
 	ParentVID int
 	VID       int
-	AppID  string
+	AppID     string
 
 	PixelW int
 	PixelH int

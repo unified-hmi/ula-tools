@@ -20,6 +20,7 @@ package core
 type CAVsurface struct {
 	AppName    string /* who is it created by */
 	VID        int
+	AppID      string
 	PixelW     int
 	PixelH     int
 	PsrcX      int

@@ -30,6 +30,7 @@ func convCAVSurface2UPIVsurface(csurf *core.CAVsurface) *UPIVsurface {
 	usurf := new(UPIVsurface)
 
 	usurf.VID = csurf.VID
+	usurf.AppID = csurf.AppID
 
 	usurf.PixelW = csurf.PixelW
 	usurf.PixelH = csurf.PixelH

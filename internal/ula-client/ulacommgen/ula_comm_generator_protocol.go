@@ -19,18 +19,19 @@ package ulacommgen
 
 /*  Ula Protocol for Initial VSurface */
 type UPIVsurface struct {
-	VID        int  `json:"VID"`
-	PixelW     int  `json:"pixel_w"`
-	PixelH     int  `json:"pixel_h"`
-	PsrcX      int  `json:"psrc_x"`
-	PsrcY      int  `json:"psrc_y"`
-	PsrcW      int  `json:"psrc_w"`
-	PsrcH      int  `json:"psrc_h"`
-	VdstX      int  `json:"vdst_x"`
-	VdstY      int  `json:"vdst_y"`
-	VdstW      int  `json:"vdst_w"`
-	VdstH      int  `json:"vdst_h"`
-	Visibility *int `json:"visibility"`
+	VID        int    `json:"VID"`
+	AppID      string `json:"AppID"`
+	PixelW     int    `json:"pixel_w"`
+	PixelH     int    `json:"pixel_h"`
+	PsrcX      int    `json:"psrc_x"`
+	PsrcY      int    `json:"psrc_y"`
+	PsrcW      int    `json:"psrc_w"`
+	PsrcH      int    `json:"psrc_h"`
+	VdstX      int    `json:"vdst_x"`
+	VdstY      int    `json:"vdst_y"`
+	VdstW      int    `json:"vdst_w"`
+	VdstH      int    `json:"vdst_h"`
+	Visibility *int   `json:"visibility"`
 }
 
 /*  Ula Protocol for Initial Vlayer */
