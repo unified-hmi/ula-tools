@@ -21,9 +21,8 @@ GO?=go
 GOBUILDFLAGS?=-v
 
 THIS_DIR=.
-MODULES=ula-node \
-	ula-distrib-com \
-	dwm-set-initial-layout
+
+MODULES=
 
 INSTALL_MODULES=$(patsubst %,install-%, $(MODULES))
 CLEAN_MODULES=$(patsubst %,clean-%, $(MODULES))
@@ -32,55 +31,72 @@ FMT_MODULES=$(patsubst %,fmt-%, $(MODULES))
 LINT_MODULES=$(patsubst %,lint-%, $(MODULES))
 DOC_MODULES=$(patsubst %,doc-%, $(MODULES))
 
-.PHONY: all install $(INSTALL_MODULES)
-all install : $(INSTALL_MODULES)
+.PHONY: all install
+all: install
 
+.PHONY: $(INSTALL_MODULES)
 $(INSTALL_MODULES):
 	set -e;\
 	target=`echo $@ | sed -e 's/install-//'`;\
 	make -C $${target} install
 
-.PHONY: test $(TEST_MODULES)
-test: $(TEST_MODULES)
-
+.PHONY: $(TEST_MODULES)
 $(TEST_MODULES) :
 	set -e;\
 	target=`echo $@ | sed -e 's/test-//'`;\
 	make -C $${target} test
 
-.PHONY: fmt $(FMT_MODULES)
-fmt: $(FMT_MODULES)
-
+.PHONY: $(FMT_MODULES)
 $(FMT_MODULES) :
 	set -e;\
 	target=`echo $@ | sed -e 's/fmt-//'`;\
 	make -C $${target} fmt
 
-.PHONY: lint $(LINT_MODULES)
-lint: $(LINT_MODULES)
-
+.PHONY: $(LINT_MODULES)
 $(LINT_MODULES):
 	set -e;\
 	target=`echo $@ | sed -e 's/lint-//'`;\
 	make -C $${target} lint
 
-.PHONY: doc $(DOC_MODULES)
-doc: $(DOC_MODULES)
-
+.PHONY: $(DOC_MODULES)
 $(DOC_MODULES):
 	set -e;\
 	target=`echo $@ | sed -e 's/doc-//'`;\
 	make -C $${target} doc
 
-.PHONY: clean $(CLEAN_MODULES)
-clean: $(CLEAN_MODULES)
-
+.PHONY: $(CLEAN_MODULES)
 $(CLEAN_MODULES):
 	set -e;\
 	target=`echo $@ | sed -e 's/clean-//'`;\
 	make -C $${target} clean 
 
-.PHONY: linuxulanodelib
-linuxulanodelib:
+install: $(INSTALL_MODULES)
 	set -e;\
-        make GOOS=${GOOS} GOARCH=${GOARCH} LIBTARGET=${LIBTARGET} -C ula-node $@
+	$(GO) install ${GOBUILDFLAGS} .
+
+.PHONY: test
+test: $(TEST_MODULES)
+	set -e;\
+	$(GO) test .
+
+.PHONY: fmt
+fmt: $(FMT_MODULES)
+	set -e;\
+	$(GO) fmt .
+
+.PHONY: lint
+lint: $(LINT_MODULES)
+	set -e;\
+	$(GO) vet .
+
+.PHONY: doc
+doc: $(DOC_MODULES)
+	set -e;\
+	$(GO) doc .
+
+.PHONY: clean
+clean: $(CLEAN_MODULES)
+	set -e;\
+	$(GO) clean -v .
+
+
