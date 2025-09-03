@@ -20,31 +20,6 @@
 GO?=go
 GOBUILDFLAGS?=-v
 
-###linux
-GOOS?=linux
-
-###################
-
-###x86 32-bit (Linux is no support)
-#GOARCH?=386
-
-###x86_64 64-bit
-GOARCH?=amd64
-
-###arm 32-bit (Linux is no support)
-#GOARCH?=arm
-
-###arm64 64-bit
-#GOARCH?=arm64
-
-ifeq ($(GOOS), linux)
-    ifeq ($(GOARCH), amd64)
-        LIBTARGET=gcc
-    else ifeq ($(GOARCH), arm64)
-        LIBTARGET=aarch64-linux-gnu-gcc
-    endif
-endif
-
 THIS_DIR=.
 MODULES=cmd \
 	internal
@@ -109,16 +84,45 @@ $(CLEAN_MODULES):
 .PHONY: ulanodelib
 ulanodelib:
 	set -e;\
-	make GOOS=${GOOS} GOARCH=${GOARCH} LIBTARGET=${LIBTARGET} LIBAPI=${LIBAPI} STRIPTARGET=${STRIPTARGET} -C cmd $@
+	make GOOS=${GOOS} GOARCH=${GOARCH} CC=${CC} LIBAPI=${LIBAPI} STRIPTARGET=${STRIPTARGET} -C cmd $@
 
 .PHONY: ulaclientlib
 ulaclientlib:
 	set -e;\
-	make GOOS=${GOOS} GOARCH=${GOARCH} LIBTARGET=${LIBTARGET} -C pkg/ula-client-lib $@
+	make GOOS=${GOOS} GOARCH=${GOARCH} CC=${CC} -C pkg/ula-client-lib $@
 
 .PHONY: linuxulanodelib
 linuxulanodelib:
 	set -e;\
-	make GOOS=${GOOS} GOARCH=${GOARCH} LIBTARGET=${LIBTARGET} -C cmd $@
+	make GOOS=${GOOS} GOARCH=${GOARCH} CC=${CC} -C cmd $@
 
 
+###################
+### custom build
+
+###linux
+CUSTOM_GOOS?=linux
+
+###x86_64 64-bit
+CUSTOM_GOARCH?=amd64
+
+###arm64 64-bit
+#CUSTOM_GOARCH?=arm64
+
+ifeq ($(CUSTOM_GOOS), linux)
+    ifeq ($(CUSTOM_GOARCH), amd64)
+        CUSTOM_CC=gcc
+    else ifeq ($(CUSTOM_GOARCH), arm64)
+        CUSTOM_CC=aarch64-linux-gnu-gcc
+    endif
+endif
+
+.PHONY: custom_all
+custom_all:
+	set -e;\
+	make GOOS=${CUSTOM_GOOS} GOARCH=${CUSTOM_GOARCH} CC=${CUSTOM_CC} all
+
+.PHONY: custom_linuxulanodelib
+custom_linuxulanodelib:
+	set -e;\
+	make GOOS=${CUSTOM_GOOS} GOARCH=${CUSTOM_GOARCH} CC=${CUSTOM_CC} linuxulanodelib

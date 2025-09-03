@@ -82,4 +82,4 @@ $(CLEAN_MODULES):
 .PHONY: linuxulanodelib
 linuxulanodelib:
 	set -e;\
-        make GOOS=${GOOS} GOARCH=${GOARCH} LIBTARGET=${LIBTARGET} -C ula-node $@
+        make GOOS=${GOOS} GOARCH=${GOARCH} CC=${CC} -C ula-node $@

@@ -31,33 +31,6 @@ FMT_MODULES=$(patsubst %,fmt-%, $(MODULES))
 LINT_MODULES=$(patsubst %,lint-%, $(MODULES))
 DOC_MODULES=$(patsubst %,doc-%, $(MODULES))
 
-
-
-###linux
-GOOS?=linux
-
-###################
-
-###x86 32-bit (Linux is no support)
-#GOARCH?=386
-
-###x86_64 64-bit
-GOARCH?=amd64
-
-###arm 32-bit (Linux is no support)
-#GOARCH?=arm
-
-###arm64 64-bit
-#GOARCH?=arm64
-
-ifeq ($(GOOS), linux)
-        ifeq ($(GOARCH), amd64)
-                LIBTARGET=gcc
-        else ifeq ($(GOARCH), arm64)
-                LIBTARGET=aarch64-linux-gnu-gcc
-        endif
-endif
-
 ULANODESO?=libulanode.so
 ULANODEH?=libulanode.h
 INSTALL_LIBDIR?=$(GOPATH)/pkg/libulanode
@@ -66,7 +39,7 @@ INSTALL_LIBDIR?=$(GOPATH)/pkg/libulanode
 .PHONY: linuxulanodelib        
 linuxulanodelib:
 	set -e ; \
-        GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=1 CC=${LIBTARGET} $(GO) build -buildmode=c-shared -o $(ULANODESO) $(GOBUILDFLAGS) -ldflags '-extldflags "-Wl,-soname=$(ULANODESO)"' . ; \
+        GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=1 CC=${CC} $(GO) build -buildmode=c-shared -o $(ULANODESO) $(GOBUILDFLAGS) -ldflags '-extldflags "-Wl,-soname=$(ULANODESO)"' . ; \
         install -o $(USER) -g $(USER) -m 755 -d $(INSTALL_LIBDIR) ; \
         install -o $(USER) -g $(USER) -m 664 $(ULANODESO) $(INSTALL_LIBDIR)/$(ULANODESO) ; \
         install -o $(USER) -g $(USER) -m 664 $(ULANODEH) $(INSTALL_LIBDIR)/$(ULANODEH) ; \
