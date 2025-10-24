@@ -15,27 +15,6 @@
  * limitations under the License.
  */
 
-package ulanode
+package dwmapi
 
-import (
-	"ula-tools/internal/ula"
-)
-
-type RdisplayCommandData struct {
-	Rdisplay    ula.RealDisplay
-	InsertOrder string
-	ReferenceId int
-	Players     []ula.PixelLayer
-	SafetyAreas []ula.PixelSafetyArea
-}
-
-type LocalCommandReq struct {
-	Command string
-	RDComms []RdisplayCommandData
-	Ret     int
-}
-
-type LocalCommandGenerator interface {
-	Start(reqChan chan LocalCommandReq, respChan chan LocalCommandReq)
-	GenerateLocalCommandReq(*ula.ApplyCommandData, *ula.NodePixelScreens) ([]*LocalCommandReq, error)
-}
+const DEFAULT_GRPC_SERVER_ADDR = "localhost:6443"

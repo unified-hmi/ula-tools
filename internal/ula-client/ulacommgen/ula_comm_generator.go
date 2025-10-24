@@ -24,11 +24,11 @@ import (
 	. "ula-tools/internal/ulog"
 )
 
-func convCAVSurface2UPIVsurface(csurf *core.CAVsurface) *UPIVsurface {
+func convCAVSurface2UPIVsurface(csurf *core.CAVsurface, appName string) *UPIVsurface {
 
 	usurf := new(UPIVsurface)
 
-	usurf.AppName = csurf.AppName
+	usurf.AppName = appName
 
 	usurf.VID = csurf.VID
 
@@ -77,7 +77,7 @@ func convCAVlayer2UPIVlayer(clayer *core.CAVlayer) *UPIVlayer {
 	ulayer.Surface = make([]UPIVsurface, 0)
 
 	for _, cVsurf := range clayer.Vsurfaces {
-		usurf := convCAVSurface2UPIVsurface(&cVsurf)
+		usurf := convCAVSurface2UPIVsurface(&cVsurf, ulayer.AppName)
 		ulayer.Surface = append(ulayer.Surface, *usurf)
 	}
 
@@ -98,10 +98,10 @@ func convCAVLayoutTree2UPIVscreen(ctree *core.CALayoutTree) *UPIVscreen {
 	return uscreen
 }
 
-func convVirtualSurface2UPIVsurface(vsurf *ula.VirtualSurface) *UPIVsurface {
+func convVirtualSurface2UPIVsurface(vsurf *ula.VirtualSurface, appName string) *UPIVsurface {
 	usurf := new(UPIVsurface)
 
-	usurf.AppName = vsurf.AppName
+	usurf.AppName = appName
 
 	usurf.VID = vsurf.VID
 

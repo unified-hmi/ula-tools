@@ -47,8 +47,13 @@
     }
   ],
   "distributed_window_system": {
-    "window_manager": {
-      "node_id": 0
+    "ucl_lifecycle_manager": {
+      "node_id": 0,
+      "port": 6543
+    },
+    "ula_client_manager": {
+      "node_id": 0,
+      "port": 6443
     },
     "framework_node": [
       {

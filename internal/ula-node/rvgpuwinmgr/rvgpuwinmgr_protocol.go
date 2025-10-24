@@ -20,6 +20,7 @@ package rvgpuwinmgr
 import (
 	"encoding/json"
 	"sync"
+	"ula-tools/internal/ula"
 	"ula-tools/internal/ula-node"
 	. "ula-tools/internal/ulog"
 )
@@ -52,35 +53,35 @@ type safetyAreaJson struct {
 	Height int `json:"height"`
 }
 
-type initialLayoutProtocol struct {
+type InitialLayoutProtocol struct {
 	Version      string            `json:"version"`
 	Command      string            `json:"command"`
 	RvgpuLayouts []rvgpuLayoutJson `json:"surfaces"`
 	SafetyAreas  []safetyAreaJson  `json:"safety_areas"`
 }
 
-type key struct {
-	rDisplayId int
-	layerID    int
+type Key struct {
+	RDisplayId int
+	LayerID    int
 }
 
-var layerSurfacesMap = make(map[key][]ulanode.PixelSurface)
+var layerSurfacesMap = make(map[Key][]ula.PixelSurface)
 var mapMutex = sync.RWMutex{}
 
-func addOrUpdateLayerSurfaces(rDisplayID int, layerID int, surfaces []ulanode.PixelSurface) {
+func addOrUpdateLayerSurfaces(rDisplayID int, layerID int, surfaces []ula.PixelSurface) {
 	mapMutex.Lock()
 	defer mapMutex.Unlock()
-	layerSurfacesMap[key{rDisplayID, layerID}] = surfaces
+	layerSurfacesMap[Key{rDisplayID, layerID}] = surfaces
 }
 
-func genRvgpuLayoutParams(player ulanode.PixelLayer, psurfaces []ulanode.PixelSurface) []rvgpuLayoutJson {
+func genRvgpuLayoutParams(player ula.PixelLayer, psurfaces []ula.PixelSurface) []rvgpuLayoutJson {
 	var rvgpuLayouts []rvgpuLayoutJson
 	for _, psurf := range psurfaces {
 		viewSrcX, viewSrcY, viewSrcW, viewSrcH, viewDstX, viewDstY, viewDstW, viewDstH := calcSrcViewArea(player, psurf)
 
 		rvgpuLayout := rvgpuLayoutJson{
 			Id:             player.VID,
-			RvgpuSurfaceID: psurf.AppName,
+			RvgpuSurfaceID: psurf.AppName, /* appli name */
 			Width:          psurf.PixelW,
 			Height:         psurf.PixelH,
 			SrcX:           viewSrcX,
@@ -99,7 +100,7 @@ func genRvgpuLayoutParams(player ulanode.PixelLayer, psurfaces []ulanode.PixelSu
 	return rvgpuLayouts
 }
 
-func calcSrcViewArea(player ulanode.PixelLayer, psurface ulanode.PixelSurface) (int, int, int, int, int, int, int, int) {
+func calcSrcViewArea(player ula.PixelLayer, psurface ula.PixelSurface) (int, int, int, int, int, int, int, int) {
 	clipX, clipY, clipWidth, clipHeight := 0, 0, 0, 0
 	clipX2, clipY2 := 0, 0
 
@@ -118,6 +119,7 @@ func calcSrcViewArea(player ulanode.PixelLayer, psurface ulanode.PixelSurface) (
 	SurfaceDstY := psurface.PdstY
 	SurfaceDstH := psurface.PdstH
 
+	// Calculate x clipping
 	if LayerSrcX+LayerSrxW <= SurfaceDstX || LayerSrcX >= SurfaceDstX+SurfaceDstW {
 		clipX = 0
 		clipWidth = 0
@@ -141,6 +143,7 @@ func calcSrcViewArea(player ulanode.PixelLayer, psurface ulanode.PixelSurface) (
 		clipWidth = player.PixelW - clipX
 	}
 
+	// Calculate y clipping
 	if LayerSrcY+LayerSrxH <= SurfaceDstY || LayerSrcY >= SurfaceDstY+SurfaceDstH {
 		clipY = 0
 		clipHeight = 0
@@ -164,6 +167,7 @@ func calcSrcViewArea(player ulanode.PixelLayer, psurface ulanode.PixelSurface) (
 		clipHeight = player.PixelH - clipY
 	}
 
+	// Scale the clipped region based on the surface source and destination sizes
 	finalSrcX := int(float64(clipX)/float64(SurfaceDstW)*float64(SurfaceSrcW)) + SurfaceSrcX
 	finalSrcWidth := int(float64(clipWidth) / float64(SurfaceDstW) * float64(SurfaceSrcW))
 
@@ -205,7 +209,7 @@ func genInitialLayoutProtocolJson(req ulanode.LocalCommandReq, rId int) (string,
 		}
 	}
 
-	rvgpuProto := initialLayoutProtocol{
+	rvgpuProto := InitialLayoutProtocol{
 		Version:      VERSION,
 		Command:      "initial_layout",
 		RvgpuLayouts: rvgpuLayouts,

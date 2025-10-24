@@ -22,7 +22,8 @@ GOBUILDFLAGS?=-v
 
 THIS_DIR=.
 MODULES=ula-node \
-	ula-distrib-com
+	ula-client-manager \
+	ula-grpc-client
 
 INSTALL_MODULES=$(patsubst %,install-%, $(MODULES))
 CLEAN_MODULES=$(patsubst %,clean-%, $(MODULES))

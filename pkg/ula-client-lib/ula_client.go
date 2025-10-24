@@ -19,19 +19,46 @@ package main
 
 import "C"
 import (
+	"context"
+	"os"
 	"ula-tools/internal/ula-client/dwmapi"
+	. "ula-tools/internal/ulog"
+	"ula-tools/proto/grpc/dwm"
 )
+
+var dwmClient dwm.DwmServiceClient
+var dwmCtx context.Context
+
+func init() {
+	ILog.SetOutput(os.Stderr)
+	conn, err := dwmapi.DwmClientInit()
+	if err != nil {
+		ELog.Println(err)
+		return
+	}
+	dwmClient = dwm.NewDwmServiceClient(conn)
+	dwmCtx = context.Background()
+}
 
 //export dwm_set_system_layout
 func dwm_set_system_layout() C.int {
-	val := dwmapi.DwmSetSystemLayout()
-	return C.int(val)
+	err := dwmapi.DwmClientSetSystemLayout(dwmClient, dwmCtx)
+	if err != nil {
+		ELog.Printf("Error calling SetSystemLayout: %v", err)
+		return -1
+	}
+	return 0
 }
 
-//export dwm_init
-func dwm_init() C.int {
-	val := dwmapi.DwmInit()
-	return C.int(val)
+//export dwm_set_layout_command
+func dwm_set_layout_command(filePathChar *C.char) C.int {
+	layoutCommandFilePath := C.GoString(filePathChar)
+	err := dwmapi.DwmClientSetLayoutCommand(dwmClient, dwmCtx, layoutCommandFilePath)
+	if err != nil {
+		ELog.Printf("Error calling SetLayoutCommand: %v", err)
+		return -1
+	}
+	return 0
 }
 
 func main() {}

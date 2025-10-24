@@ -65,6 +65,7 @@ func IsRvgpuCompositor(
 		}
 	}
 	if len(rvgpuComs) > 0 {
+		DLog.Println(rvgpuComs)
 		return true
 	}
 	return false
@@ -77,7 +78,7 @@ func retryConnectTarget(sockChan chan net.Conn, stopChan chan struct{}, domainNa
 		conn, err := net.Dial("unix", abstract_domain_sock)
 		if err == nil {
 			sockChan <- conn
-			return
+			break
 		}
 		time.Sleep(10 * time.Millisecond)
 
@@ -156,13 +157,13 @@ func handleConnectTarget(compositor *rvgpuCompositor, wg *sync.WaitGroup) {
 	}
 }
 
-func rvgpuMultiConn(compositors *[]rvgpuCompositor) {
+func rvgpuMultiConn(compositor *[]rvgpuCompositor) {
 
 	var wg sync.WaitGroup
-	for i, comp := range *compositors {
+	for i, comp := range *compositor {
 		if comp.conn == nil {
 			wg.Add(1)
-			go handleConnectTarget(&(*compositors)[i], &wg)
+			go handleConnectTarget(&(*compositor)[i], &wg)
 		}
 	}
 	wg.Wait()
@@ -195,6 +196,7 @@ func handleConnectTargetOnce(compositor *rvgpuCompositor, wg *sync.WaitGroup) {
 	compositor.recvChan = make(chan []byte, 1)
 
 	defer func() {
+		DLog.Println("[2]defunc call")
 		compositor.conn.Close()
 		compositor.conn = nil
 		close(compositor.waitChan)
@@ -222,13 +224,13 @@ func handleConnectTargetOnce(compositor *rvgpuCompositor, wg *sync.WaitGroup) {
 	}
 }
 
-func rvgpuMultiConnOnce(compositors *[]rvgpuCompositor) {
+func rvgpuMultiConnOnce(compositor *[]rvgpuCompositor) {
 
 	var wg sync.WaitGroup
-	for i, comp := range *compositors {
+	for i, comp := range *compositor {
 		if comp.conn == nil {
 			wg.Add(1)
-			go handleConnectTargetOnce(&(*compositors)[i], &wg)
+			go handleConnectTargetOnce(&(*compositor)[i], &wg)
 		}
 	}
 	wg.Wait()
@@ -251,23 +253,21 @@ func (plugin RvgpuPlugin) Start(reqChan chan ulanode.LocalCommandReq, respChan c
 	}
 }
 
-func sendRvgpuCompositorJson(compositors *[]rvgpuCompositor, lComReq ulanode.LocalCommandReq) int {
+func sendRvgpuCompositorJson(compositor *[]rvgpuCompositor, lComReq ulanode.LocalCommandReq) int {
 
 	msg := ""
 	var err error
 
 	DLog.Println("sendRvgpuCompositorJson", lComReq)
 	var rIds = make([]int, 0)
-	for i := range *compositors {
+	for i := range *compositor {
 
-		comp := &(*compositors)[i]
+		comp := &(*compositor)[i]
 		switch lComReq.Command {
 		case "initial_vscreen":
 			msg, err = genInitialLayoutProtocolJson(lComReq, comp.rId)
-		case "local_comm":
-			continue
 		default:
-			ELog.Println("Error lComReq.Command")
+			WLog.Println("Error lComReq.Command")
 			continue
 		}
 
@@ -275,7 +275,7 @@ func sendRvgpuCompositorJson(compositors *[]rvgpuCompositor, lComReq ulanode.Loc
 			continue
 		}
 		if err != nil {
-			ELog.Println("Error ProtocolJson")
+			WLog.Println("Error ProtocolJson")
 			continue
 		}
 
@@ -285,8 +285,8 @@ func sendRvgpuCompositorJson(compositors *[]rvgpuCompositor, lComReq ulanode.Loc
 		}
 	}
 
-	for i := range *compositors {
-		comp := &(*compositors)[i]
+	for i := range *compositor {
+		comp := &(*compositor)[i]
 		if comp.conn != nil {
 			for _, rId := range rIds {
 				if rId == comp.rId {
@@ -316,17 +316,18 @@ func sendCommand(conn net.Conn, command string) {
 	}
 }
 
-func connReadLoop(conn net.Conn, recvChan chan []byte) {
+func connReadLoop(conn net.Conn, rcvChan chan []byte) {
 
 	cbio := bufio.NewReader(conn)
 	for {
+		/* "Layout complete" from rvgpu compositor message */
 		recvSize := 15
 		recvBuf := make([]byte, recvSize)
 		_, err := io.ReadFull(cbio, recvBuf)
 		if err != nil {
-			recvChan <- nil
+			rcvChan <- nil
 			return
 		}
-		recvChan <- recvBuf
+		rcvChan <- recvBuf
 	}
 }

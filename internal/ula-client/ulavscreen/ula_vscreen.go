@@ -15,14 +15,20 @@
  * limitations under the License.
  */
 
-package ulanode
+package ulavscreen
 
 import (
-	_ "encoding/json"
+	"encoding/json"
 	"errors"
+	_ "fmt"
+	"sync"
 	"ula-tools/internal/ula"
 	. "ula-tools/internal/ulog"
 )
+
+var vScreenMutex sync.RWMutex
+var VScreen *VirtualScreen
+var NodePixelScreens *ula.NodePixelScreens
 
 func getStringFromJson(mJson map[string]interface{}, key string) (string, error) {
 
@@ -68,25 +74,6 @@ func getSliceFromJson(mJson map[string]interface{}, key string) ([]interface{}, 
 	return val, nil
 }
 
-func getCoordFromJson(mJson map[string]interface{}, key string) (ula.Coord, error) {
-
-	tval := mJson[key]
-	if tval == nil {
-		return 0, errors.New("getCoordFromJson")
-	}
-
-	defval := ula.COORD_GLOBAL
-	if tval == "global" {
-		defval = ula.COORD_GLOBAL
-	} else if tval == "vdisplay" {
-		defval = ula.COORD_VDISPLAY
-	} else {
-		return 0, errors.New("getCoordFromJson")
-	}
-
-	return defval, nil
-}
-
 func getCoordFromJsonDef(mJson map[string]interface{}, key string, defval ula.Coord) (ula.Coord, error) {
 
 	tval := mJson[key]
@@ -105,12 +92,7 @@ func getCoordFromJsonDef(mJson map[string]interface{}, key string, defval ula.Co
 	return defval, nil
 }
 
-func generateSurfaceFromParam(layerId int, mSurface map[string]interface{}) (*ula.VirtualSurface, error) {
-
-	appli_name, err := getStringFromJson(mSurface, "appli_name")
-	if err != nil {
-		return nil, err
-	}
+func generateSurfaceFromParam(layerId int, mSurface map[string]interface{}, appli_name string) (*ula.VirtualSurface, error) {
 
 	surfaceId, err := getIntFromJson(mSurface, "VID")
 	if err != nil {
@@ -202,6 +184,188 @@ func generateSurfaceFromParam(layerId int, mSurface map[string]interface{}) (*ul
 	}
 
 	return &vsurface, nil
+}
+
+type VirtualScreen struct {
+	VScrnDef ula.VScrnDef
+
+	/* the same as vscrnDef.Size.VirtualW and vscrnDef.Size.VirtualH */
+	VirtualWidth  int
+	VirtualHeight int
+
+	VirtualDisplays   map[int]ula.VirtualDisplay
+	RealDisplays      map[int]ula.RealDisplay
+	VdispVlayers      map[int][]ula.VirtualLayer
+	VdispVsafetyAreas map[int][]ula.VirtualSafetyArea
+}
+
+func NewVirtualScreen(vscrnDef *ula.VScrnDef) (*VirtualScreen, error) {
+
+	vscreen := VirtualScreen{
+		VScrnDef:          *vscrnDef,
+		VirtualWidth:      vscrnDef.Def2D.Size.VirtualW,
+		VirtualHeight:     vscrnDef.Def2D.Size.VirtualH,
+		VirtualDisplays:   make(map[int]ula.VirtualDisplay),
+		RealDisplays:      make(map[int]ula.RealDisplay),
+		VdispVlayers:      make(map[int][]ula.VirtualLayer),
+		VdispVsafetyAreas: make(map[int][]ula.VirtualSafetyArea),
+	}
+
+	for _, r := range vscrnDef.Def2D.VirtualDisplays {
+		vscreen.VirtualDisplays[r.VDisplayId] = ula.VirtualDisplay{
+			DispName:   r.DispName,
+			VDisplayId: r.VDisplayId,
+			VirtualX:   r.VirtualX,
+			VirtualY:   r.VirtualY,
+			VirtualW:   r.VirtualW,
+			VirtualH:   r.VirtualH,
+		}
+		vscreen.VdispVlayers[r.VDisplayId] = make([]ula.VirtualLayer, 0)
+	}
+
+	for _, r := range vscrnDef.RealDisplays {
+		vscreen.RealDisplays[r.VDisplayId] = ula.RealDisplay{
+			NodeId:     r.NodeId,
+			VDisplayId: r.VDisplayId,
+			PixelW:     r.PixelW,
+			PixelH:     r.PixelH,
+			RDisplayId: r.RDisplayId,
+		}
+	}
+
+	vVdispVsafetyAreas := make([]ula.VirtualSafetyArea, 0)
+	for _, r := range vscrnDef.VirtualSafetyArea {
+		vVdispVsafetyArea := ula.VirtualSafetyArea{
+			VirtualX: r.VirtualX,
+			VirtualY: r.VirtualY,
+			VirtualW: r.VirtualW,
+			VirtualH: r.VirtualH,
+		}
+		vVdispVsafetyAreas = append(vVdispVsafetyAreas, vVdispVsafetyArea)
+	}
+	for _, r := range vscrnDef.Def2D.VirtualDisplays {
+		vscreen.VdispVsafetyAreas[r.VDisplayId] = vVdispVsafetyAreas
+	}
+
+	return &vscreen, nil
+}
+
+func (vscreen *VirtualScreen) Dup() *VirtualScreen {
+	vScreenMutex.RLock()
+	defer vScreenMutex.RUnlock()
+	copiedVDsps := make(map[int]ula.VirtualDisplay)
+	copiedRDsps := make(map[int]ula.RealDisplay)
+	copiedVDispVLayers := make(map[int][]ula.VirtualLayer)
+	copiedVdispVsafetyAreas := make(map[int][]ula.VirtualSafetyArea)
+
+	for vdspid, vdisplay := range vscreen.VirtualDisplays {
+		copiedVDsp := vdisplay
+		copiedRDsp := vscreen.RealDisplays[vdspid]
+		copiedVLayers := vscreen.VdispVlayers[vdspid]
+		copiedVSafetyAreas := vscreen.VdispVsafetyAreas[vdspid]
+
+		copiedVDsps[vdspid] = copiedVDsp
+		copiedRDsps[vdspid] = copiedRDsp
+		copiedVDispVLayers[vdspid] = ula.DupVirtualLayerSlice(copiedVLayers)
+		copiedVdispVsafetyAreas[vdspid] = ula.DupVirtualSafetyAreaSlice(copiedVSafetyAreas)
+	}
+
+	copiedVscreen := *vscreen
+	copiedVscreen.VirtualDisplays = copiedVDsps
+	copiedVscreen.RealDisplays = copiedRDsps
+	copiedVscreen.VdispVlayers = copiedVDispVLayers
+	copiedVscreen.VdispVsafetyAreas = copiedVdispVsafetyAreas
+	return &copiedVscreen
+}
+
+func (vscrn *VirtualScreen) ApplyCommand(mJson map[string]interface{}) (*ula.ApplyCommandData, error) {
+	vScreenMutex.RLock()
+	defer vScreenMutex.RUnlock()
+	command := mJson["command"].(string)
+	DLog.Println("command=", command)
+
+	var chgIds []ula.IdPair
+	var err error
+
+	switch command {
+	case "initial_vscreen":
+		DLog.Println("@@INITIAL_VSCREEN@@")
+		chgIds, err = initVirtualScreen(vscrn, mJson)
+	default:
+		chgIds = make([]ula.IdPair, 0)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	var vids []int
+	for _, vdisp := range vscrn.VirtualDisplays {
+		vids = make([]int, 0)
+		for _, vlayer := range vscrn.VdispVlayers[vdisp.VDisplayId] {
+			vids = append(vids, vlayer.VID)
+		}
+		DLog.Println("ApplyCommand command: ", command, " vdispId: ", vdisp.VDisplayId, " vids: ", vids)
+	}
+
+	acdata := &ula.ApplyCommandData{Command: command, ChgIds: chgIds}
+
+	return acdata, nil
+
+}
+
+func initVirtualScreen(vscreen *VirtualScreen, mJson map[string]interface{}) ([]ula.IdPair, error) {
+	err := fillVscreenFromParam(vscreen, mJson)
+	if err != nil {
+		return make([]ula.IdPair, 0), err
+	}
+
+	return make([]ula.IdPair, 0), nil
+}
+
+func ApplyAndGenCommand(command string, nodeId int) (string, error) {
+	var applyCommand map[string]interface{}
+	if err := json.Unmarshal([]byte(command), &applyCommand); err != nil {
+		ELog.Printf("Unmarshal json command error: %s\n", err)
+		return "", err
+	}
+
+	vscrnCopy := VScreen.Dup()
+
+	acdata, err := vscrnCopy.ApplyCommand(applyCommand)
+	if err != nil {
+		ELog.Printf("ApplyCommand error: %s\n", err)
+		return "", err
+	}
+
+	vs2rdConv, err := NewVscreen2RdisplayConverter(vscrnCopy, nodeId)
+	if err != nil {
+		ELog.Printf("Failed to create converter: %s\n", err)
+		return "", err
+	}
+
+	var vsconv GeometoryConverter = vs2rdConv
+	vsconv.DoConvert()
+
+	acdata.NPScreens, err = vsconv.GetNodePixelScreens()
+	if err != nil {
+		ELog.Printf("GetNodePixelScreens error: %s\n", err)
+		return "", err
+	}
+
+	jsonBytes, err := json.Marshal(acdata)
+	if err != nil {
+		ELog.Printf("Marshal ApplyCommandData error: %s\n", err)
+		return "", err
+	}
+
+	jsonCommand := string(jsonBytes)
+
+	vScreenMutex.Lock()
+	VScreen = vscrnCopy
+	vScreenMutex.Unlock()
+
+	return jsonCommand, nil
 }
 
 func generateLayerFromParam(mLayer map[string]interface{}, genSurfaces bool, existingVlayer *ula.VirtualLayer) (*ula.VirtualLayer, error) {
@@ -381,7 +545,7 @@ func generateLayerFromParam(mLayer map[string]interface{}, genSurfaces bool, exi
 		}
 
 		for _, mSurface := range surfaces {
-			newVsurface, err := generateSurfaceFromParam(layerId, mSurface.(map[string]interface{}))
+			newVsurface, err := generateSurfaceFromParam(layerId, mSurface.(map[string]interface{}), appli_name)
 			if err != nil {
 				ELog.Println("error in generateLayerFromParam")
 				return nil, err
@@ -412,6 +576,7 @@ func generateLayerFromParam(mLayer map[string]interface{}, genSurfaces bool, exi
 	return &vlayer, nil
 }
 
+/* fill initial virtual layer, virtual window param*/
 func fillVscreenFromParam(vscreen *VirtualScreen, mJson map[string]interface{}) error {
 
 	vlayers := make([]ula.VirtualLayer, 0)

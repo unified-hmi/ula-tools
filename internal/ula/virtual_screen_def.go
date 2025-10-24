@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"net"
 	"os"
 )
 
@@ -56,6 +57,10 @@ type VScrnDef struct {
 	} `json:"node"`
 
 	DistributedWindowSystem struct {
+		ULAClientManager struct {
+			NodeId int `json:"node_id"`
+			Port   int `json:"port"`
+		} `json:"ula_client_manager"`
 		FrameworkNode []struct {
 			NodeId int `json:"node_id"`
 			Ula    struct {
@@ -117,17 +122,93 @@ func (vdef *VScrnDef) IsVDisplayInNode(nodeId int, vDisplayId int) bool {
 	return false
 }
 
-func (vdef *VScrnDef) GetVDisplays() []VirtualDisplay {
-	vDisplays := make([]VirtualDisplay, 0)
-	for _, vdisplay := range vdef.Def2D.VirtualDisplays {
-		var tmp VirtualDisplay
-		tmp.DispName = vdisplay.DispName
-		tmp.VDisplayId = vdisplay.VDisplayId
-		tmp.VirtualX = vdisplay.VirtualX
-		tmp.VirtualY = vdisplay.VirtualY
-		tmp.VirtualW = vdisplay.VirtualW
-		tmp.VirtualH = vdisplay.VirtualH
-		vDisplays = append(vDisplays, tmp)
+func (vdef *VScrnDef) GetNodeIdByHostName(hostname string) (int, error) {
+
+	for _, r := range vdef.Nodes {
+		if hostname == r.HostName {
+			return r.NodeId, nil
+		}
 	}
-	return vDisplays
+
+	return -1, errors.New("Cannot Find My NodeId from VScrnDef json")
+}
+
+func (vdef *VScrnDef) GetIpAddrByNodeIdAndIpCandidateList(ipAddrs []string, nodeId int) (string, error) {
+
+	for _, r := range vdef.Nodes {
+		if nodeId == r.NodeId {
+			for _, ipaddr := range ipAddrs {
+				if ipaddr == r.Ip {
+					return ipaddr, nil
+				}
+			}
+		}
+	}
+
+	return "0.0.0.0", errors.New("The acquired IP address does not exist in VScrnDef json")
+}
+
+func (vdef *VScrnDef) GetPort(nodeId int) (int, error) {
+
+	for _, r := range vdef.DistributedWindowSystem.FrameworkNode {
+		if nodeId == r.NodeId {
+			return r.Ula.Port, nil
+		}
+	}
+
+	return -1, errors.New("Cannot Find My Port from VScrnDef json")
+}
+
+func isIpv4(ip string) bool {
+	if net.ParseIP(ip) != nil {
+		for i := 0; i < len(ip); i++ {
+			switch ip[i] {
+			case '.':
+				return true
+			case ':':
+				return false
+			}
+		}
+	}
+
+	return false
+}
+
+func GetIpv4AddrsOfAllInterfaces() ([]string, error) {
+
+	var ipaddrs []string
+
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ipaddrs, err
+	}
+
+	/* make ipaddrs slice */
+	for _, i := range ifaces {
+		addrs, err := i.Addrs()
+		if err != nil {
+			continue
+		}
+
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+
+			if isIpv4(ip.String()) {
+				ipaddrs = append(ipaddrs, ip.String())
+			}
+		}
+	}
+
+	if len(ipaddrs) == 0 {
+		return ipaddrs, errors.New("Cannot Find Ipv4Addr from Interfaces")
+	} else {
+		return ipaddrs, nil
+	}
+
 }

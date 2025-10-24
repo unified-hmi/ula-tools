@@ -23,12 +23,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"reflect"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 	"ula-tools/internal/ula"
+	"ula-tools/internal/ula-client/ulavscreen"
 	. "ula-tools/internal/ulog"
 )
 
@@ -40,28 +43,71 @@ var Mutex struct {
 	sync.Mutex
 }
 
+type TargetNodeAddr struct {
+	NodeId     int
+	TargetAddr string
+}
+
 type UlaMultiConnector struct {
-	targetAddrs []string
-	sendChans   []chan string
-	respChans   []chan UlaCommandResponse
+	targetNodeAddrs []TargetNodeAddr
+	sendChans       []chan string
+	respChans       []chan UlaCommandResponse
+	force           bool
 }
 
 type UlaCommandResponse struct {
 	Type   string
 	Result int
-	Data   []ula.VirtualLayer
 }
 
 type DistribNode struct {
-	Ip   string
-	Port int
+	NodeId int
+	Ip     string
+	Port   int
 }
 
-func newUlaMultiConn(targets []string) error {
-	UlaMulCon = &UlaMultiConnector{
-		targetAddrs: targets,
+func newUlaMultiConn(force bool, vsdPath ...string) (*UlaMultiConnector, error) {
+
+	dNodes, err := getDistribNodes(vsdPath...)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+
+	targetNum := 0
+	var targets []TargetNodeAddr
+	for _, d := range dNodes {
+		targetAddr := d.Ip + ":" + strconv.Itoa(d.Port)
+		targets = append(targets, TargetNodeAddr{
+			NodeId:     d.NodeId,
+			TargetAddr: targetAddr,
+		})
+		targetNum++
+	}
+
+	if targetNum == 0 {
+		return nil, errors.New("targetNode is not set correctly. Please check your virtual-screen-def.json file")
+	}
+
+	if UlaMulCon != nil && reflect.DeepEqual(UlaMulCon.targetNodeAddrs, targets) {
+		WLog.Println("UlaMulCon has already initialized")
+		return nil, nil
+	}
+
+	sendChans := make([]chan string, len(targets))
+	respChans := make([]chan UlaCommandResponse, len(targets))
+	for i := range targets {
+		sendChans[i] = nil
+		respChans[i] = nil
+	}
+
+	var ulaMulCon *UlaMultiConnector
+	ulaMulCon = &UlaMultiConnector{
+		targetNodeAddrs: targets,
+		sendChans:       sendChans,
+		respChans:       respChans,
+		force:           force,
+	}
+	return ulaMulCon, nil
 }
 
 func retryConnectTarget(sockChan chan net.Conn, addr string) {
@@ -76,23 +122,29 @@ func retryConnectTarget(sockChan chan net.Conn, addr string) {
 	}
 }
 
-func connectTarget(addr string) (net.Conn, error) {
-	var conn net.Conn
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	sockChan := make(chan net.Conn, 1)
-
-	go retryConnectTarget(sockChan, addr)
-
-	select {
-	case <-ctx.Done():
-		return nil, errors.New("Dial cannot connect to master")
-	case conn = <-sockChan:
+func connectTarget(addr string, timeout time.Duration) (net.Conn, error) {
+	conn, err := net.Dial("tcp", addr)
+	if err == nil {
 		ILog.Println("Dial connected to ", addr)
+		return conn, nil
 	}
 
-	return conn, nil
+	if timeout > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), timeout*time.Second)
+		defer cancel()
+		sockChan := make(chan net.Conn, 1)
+		go retryConnectTarget(sockChan, addr)
+
+		select {
+		case <-ctx.Done():
+			return nil, errors.New("Dial cannot connect to master")
+		case conn = <-sockChan:
+			ILog.Println("Retry Dial connected to ", addr)
+			return conn, nil
+		}
+	}
+
+	return nil, errors.New("Dial cannot connect to master")
 }
 
 func sendCommand(conn net.Conn, command string) ([]byte, uint32, error) {
@@ -100,7 +152,7 @@ func sendCommand(conn net.Conn, command string) ([]byte, uint32, error) {
 	n, err := conn.Write(MAGIC_CODE)
 	if err != nil || n == 0 {
 		ELog.Printf("Write MAGIC_CODE error: %s \n", err)
-		return nil, 0, errors.New("MAGIC_CODE Write Fail")
+		return nil, 0, err
 	}
 
 	msgLen := uint32(len(command))
@@ -111,13 +163,13 @@ func sendCommand(conn net.Conn, command string) ([]byte, uint32, error) {
 	n, err = conn.Write([]byte(size))
 	if err != nil || n == 0 {
 		ELog.Printf("Write DATA Size error: %s \n", err)
-		return nil, 0, errors.New("Command Size Write Fail")
+		return nil, 0, err
 	}
 
 	n, err = conn.Write([]byte(command))
 	if err != nil || n == 0 {
 		ELog.Printf("Write error: %s \n", err)
-		return nil, 0, errors.New("Command Write Fail")
+		return nil, 0, err
 	}
 
 	n, err = conn.Read(size)
@@ -125,7 +177,7 @@ func sendCommand(conn net.Conn, command string) ([]byte, uint32, error) {
 
 	if err != nil || n == 0 {
 		ELog.Printf("Read error: %s \n", err)
-		return nil, 0, errors.New("Response Size Read Fail")
+		return nil, 0, err
 	}
 
 	buf := make([]byte, 0)
@@ -134,7 +186,7 @@ func sendCommand(conn net.Conn, command string) ([]byte, uint32, error) {
 	for {
 		n, err = conn.Read(tmp)
 		if err != nil {
-			return nil, 0, errors.New("Response Read Fail")
+			return nil, 0, err
 		}
 		count += uint32(n)
 		buf = append(buf, tmp[:n]...)
@@ -145,30 +197,49 @@ func sendCommand(conn net.Conn, command string) ([]byte, uint32, error) {
 	return buf, retSize, nil
 }
 
-func handleConnectTarget(ums *UlaMultiConnector, addr string, sendChan chan string, respChan chan UlaCommandResponse, wg *sync.WaitGroup) {
+func handleConnectTarget(ums *UlaMultiConnector, chanId int, targetNodeAddr TargetNodeAddr, sendChan chan string, respChan chan UlaCommandResponse, wg *sync.WaitGroup) {
 
 	var err error
-	conn, err := connectTarget(addr)
+	conn, err := connectTarget(targetNodeAddr.TargetAddr, 0)
 	if err != nil {
-		WLog.Println("Failed connect target: ", addr, " err: ", err)
+		WLog.Println("Failed connect target: ", targetNodeAddr.TargetAddr, " err: ", err)
 		wg.Done()
 		return
 	}
 	defer conn.Close()
 
 	Mutex.Lock()
-	ums.sendChans = append(ums.sendChans, sendChan)
-	ums.respChans = append(ums.respChans, respChan)
+	ums.sendChans[chanId] = sendChan
+	ums.respChans[chanId] = respChan
 	Mutex.Unlock()
 
 	wg.Done()
 	for {
 		select {
 		case command := <-sendChan:
-
-			respBuf, respSize, err := sendCommand(conn, command)
+			jsonCommand, err := ulavscreen.ApplyAndGenCommand(command, targetNodeAddr.NodeId)
+			if err != nil {
+				ELog.Printf("Apply and Generate command Fail: %s \n", err)
+				continue
+			}
+			respBuf, respSize, err := sendCommand(conn, jsonCommand)
 			var ucr UlaCommandResponse
 			if err != nil {
+				if err == io.EOF || errors.Is(err, syscall.EPIPE) {
+					WLog.Println("Connection closed, Retrying connect to ", targetNodeAddr.TargetAddr)
+					conn.Close()
+					conn, err = connectTarget(targetNodeAddr.TargetAddr, 1)
+					if err != nil {
+						WLog.Println("Reconnection failed for ", targetNodeAddr.TargetAddr)
+						Mutex.Lock()
+						ums.sendChans[chanId] = nil
+						ums.respChans[chanId] = nil
+						Mutex.Unlock()
+						return
+					}
+					ILog.Println("Successfully reconnected to ", targetNodeAddr.TargetAddr)
+					continue
+				}
 				ELog.Printf("Send command Fail: %s \n", err)
 			} else {
 				err = json.Unmarshal([]byte(string(respBuf[:respSize])), &ucr)
@@ -182,31 +253,38 @@ func handleConnectTarget(ums *UlaMultiConnector, addr string, sendChan chan stri
 	}
 }
 
-func (ums *UlaMultiConnector) handleConnectTargets(force bool) error {
-
-	var wg sync.WaitGroup
-	for _, targetAddr := range ums.targetAddrs {
-		wg.Add(1)
-		sendChan := make(chan string, 1)
-		respChan := make(chan UlaCommandResponse, 1)
-		go handleConnectTarget(ums, targetAddr, sendChan, respChan, &wg)
-	}
-	wg.Wait()
-
-	if len(ums.sendChans) == 0 || len(ums.respChans) == 0 {
-		return errors.New("All targets cannot connect master")
-	}
-
-	if !force {
-		if len(ums.sendChans) < len(ums.targetAddrs) || len(ums.respChans) < len(ums.targetAddrs) {
-			return errors.New(fmt.Sprintf("Some targets cannot connect master (%d < %d)", len(ums.sendChans), len(ums.targetAddrs)))
+func (ums *UlaMultiConnector) countConnection() int {
+	connectNum := 0
+	for chanId := range ums.targetNodeAddrs {
+		if ums.sendChans[chanId] == nil {
+			continue
 		}
+		if ums.respChans[chanId] == nil {
+			continue
+		}
+		connectNum++
 	}
 
-	return nil
+	return connectNum
 }
 
-func waitResponse(waitTime time.Duration, respChan chan UlaCommandResponse, targetAddr string, wg *sync.WaitGroup, resp *UlaCommandResponse) {
+func (ums *UlaMultiConnector) handleConnectTargets() {
+
+	var wg sync.WaitGroup
+	for chanId, targetNodeAddr := range ums.targetNodeAddrs {
+		if ums.sendChans[chanId] == nil || ums.respChans[chanId] == nil {
+			wg.Add(1)
+			sendChan := make(chan string, 1)
+			respChan := make(chan UlaCommandResponse, 1)
+			go handleConnectTarget(ums, chanId, targetNodeAddr, sendChan, respChan, &wg)
+		} else {
+			WLog.Println("targetNodeAddr ", targetNodeAddr, " has already connected to ula-node")
+		}
+	}
+	wg.Wait()
+}
+
+func waitResponse(waitTime time.Duration, respChan chan UlaCommandResponse, targetAddr string, wg *sync.WaitGroup, resp **UlaCommandResponse) {
 
 	t := time.NewTicker(waitTime * time.Second)
 	defer t.Stop()
@@ -214,23 +292,29 @@ func waitResponse(waitTime time.Duration, respChan chan UlaCommandResponse, targ
 
 	select {
 	case ucr := <-respChan:
-		*resp = ucr
+		*resp = &ucr
 		break
 	case <-t.C:
+		timeoutResp := UlaCommandResponse{
+			Type:   "result",
+			Result: -1,
+		}
+		*resp = &timeoutResp
 		ELog.Printf("Command response watchdog was timeout. target: %s", targetAddr)
 		break
 	}
 }
 
 func (ums *UlaMultiConnector) sendCommand(command string) UlaCommandResponse {
-
 	Mutex.Lock()
 	var wg sync.WaitGroup
-	resps := make([]UlaCommandResponse, len(ums.sendChans))
+	resps := make([]*UlaCommandResponse, len(ums.sendChans))
 	for chanId, sendChan := range ums.sendChans {
-		wg.Add(1)
-		sendChan <- command
-		go waitResponse(1, ums.respChans[chanId], ums.targetAddrs[chanId], &wg, &resps[chanId])
+		if sendChan != nil && ums.respChans[chanId] != nil {
+			wg.Add(1)
+			sendChan <- command
+			go waitResponse(1, ums.respChans[chanId], ums.targetNodeAddrs[chanId].TargetAddr, &wg, &resps[chanId])
+		}
 	}
 	wg.Wait()
 
@@ -241,9 +325,21 @@ func (ums *UlaMultiConnector) sendCommand(command string) UlaCommandResponse {
 }
 
 func (ums *UlaMultiConnector) SendLayoutCommand(command string) error {
-	if len(ums.sendChans) == 0 {
-		return errors.New("Don't have connection, so cannot send layout commands")
+	connectNum := ums.countConnection()
+	if connectNum < len(ums.targetNodeAddrs) {
+		ums.handleConnectTargets()
+		connectNum = ums.countConnection()
+		if connectNum == 0 {
+			return errors.New("All targets cannot connect master")
+		}
+
+		if !ums.force {
+			if connectNum < len(ums.targetNodeAddrs) {
+				return errors.New(fmt.Sprintf("Some targets cannot connect master (%d < %d)", connectNum, len(ums.targetNodeAddrs)))
+			}
+		}
 	}
+
 	ucr := ums.sendCommand(command)
 	if ucr.Type == "result" {
 		ret := ucr.Result
@@ -251,26 +347,22 @@ func (ums *UlaMultiConnector) SendLayoutCommand(command string) error {
 			return errors.New("SendLayoutCommand Failed")
 		}
 	} else {
-		return errors.New("result formart type miss matched")
+		return errors.New("result format type miss matched")
 	}
 
 	return nil
 }
 
-func mergeResponses(resps []UlaCommandResponse) UlaCommandResponse {
+func mergeResponses(resps []*UlaCommandResponse) UlaCommandResponse {
 	var ret UlaCommandResponse
 	for _, resp := range resps {
-		ret.Type = resp.Type
-		switch ret.Type {
-		case "result":
-			ret.Result = ret.Result | resp.Result
-			break
-
-		case "data":
-			if !reflect.DeepEqual(ret.Data, resp.Data) {
-				ret.Data = resp.Data
+		if resp != nil {
+			ret.Type = resp.Type
+			switch ret.Type {
+			case "result":
+				ret.Result = ret.Result | resp.Result
+				break
 			}
-			break
 		}
 	}
 	return ret
@@ -291,6 +383,7 @@ func getDistribNodes(vsdPath ...string) ([]DistribNode, error) {
 			}
 
 			var tmp DistribNode
+			tmp.NodeId = node.NodeId
 			tmp.Ip = node.Ip
 			tmp.Port = frameworkNode.Ula.Port
 			dNodes = append(dNodes, tmp)
@@ -302,30 +395,11 @@ func getDistribNodes(vsdPath ...string) ([]DistribNode, error) {
 
 func UlaConnectionInit(force bool, vsdPath ...string) error {
 	var err error
-	dNodes, err := getDistribNodes(vsdPath...)
-	if err != nil {
-		ELog.Println(err)
-		return err
-	}
-	targetNum := 0
-	var targetAddrs []string
-
-	for _, d := range dNodes {
-		targetAddr := d.Ip + ":" + strconv.Itoa(d.Port)
-		targetAddrs = append(targetAddrs, targetAddr)
-		targetNum++
-	}
-
-	err = newUlaMultiConn(targetAddrs)
-
-	if err != nil {
-		ELog.Println(err)
-		return err
-	}
-
-	err = UlaMulCon.handleConnectTargets(force)
+	UlaMulCon, err = newUlaMultiConn(force, vsdPath...)
 	if err != nil {
 		return err
 	}
+
+	UlaMulCon.handleConnectTargets()
 	return nil
 }

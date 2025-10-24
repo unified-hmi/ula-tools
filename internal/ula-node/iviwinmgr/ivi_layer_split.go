@@ -18,12 +18,13 @@
 package iviwinmgr
 
 import (
-	"ula-tools/internal/ula-node"
+	"ula-tools/internal/ula"
 )
 
 type PLayerSplitIdTbl struct {
 	RDisplayId int
-	IdPair     map[int]int
+
+	IdPair map[int]int
 }
 
 var pLayerSplitIDs []PLayerSplitIdTbl
@@ -49,7 +50,7 @@ func makeDiffPLayerSplitTbl(diffPLayerSplitIDs *[]PLayerSplitIdTbl, rDisplayId i
 }
 
 func genSplitLayerID(
-	spscrns *ulanode.NodePixelScreens, layerVID int, rDisplayId int, diffPLayerSplitIDs *[]PLayerSplitIdTbl) int {
+	spscrns *ula.NodePixelScreens, layerVID int, rDisplayId int, diffPLayerSplitIDs *[]PLayerSplitIdTbl) int {
 
 	for _, splitID := range pLayerSplitIDs {
 		if splitID.RDisplayId == rDisplayId {
@@ -105,7 +106,7 @@ RETRY:
 }
 
 func splitIviLayer(
-	spscrns *ulanode.NodePixelScreens) (*ulanode.NodePixelScreens, error) {
+	spscrns *ula.NodePixelScreens) (*ula.NodePixelScreens, error) {
 
 	diffPLayerSplitIDs := make([]PLayerSplitIdTbl, 0)
 
@@ -151,7 +152,7 @@ func splitIviLayer(
 
 }
 
-func splitLayer(srvPixScreens *ulanode.NodePixelScreens) (*ulanode.NodePixelScreens, error) {
+func splitLayer(srvPixScreens *ula.NodePixelScreens) (*ula.NodePixelScreens, error) {
 
 	dpscrns, err := splitIviLayer(srvPixScreens)
 	if err != nil {

@@ -18,7 +18,6 @@
       "vdst_h": 540,
       "vsurface": [
         {
-          "appli_name": "wayland-app",
           "VID": 5100,
           "pixel_w": 400,
           "pixel_h": 240,

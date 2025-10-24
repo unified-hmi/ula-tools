@@ -15,27 +15,39 @@
  * limitations under the License.
  */
 
-package ulanode
+package main
 
 import (
-	"ula-tools/internal/ula"
+	"flag"
+	"os"
+	"ula-tools/internal/ula-client/dwmapi"
+	. "ula-tools/internal/ulog"
 )
 
-type RdisplayCommandData struct {
-	Rdisplay    ula.RealDisplay
-	InsertOrder string
-	ReferenceId int
-	Players     []ula.PixelLayer
-	SafetyAreas []ula.PixelSafetyArea
-}
+func main() {
+	var (
+		verbose      bool
+		debug        bool
+		vScrnDefFile string
+	)
 
-type LocalCommandReq struct {
-	Command string
-	RDComms []RdisplayCommandData
-	Ret     int
-}
+	flag.BoolVar(&verbose, "v", true, "verbose info log")
+	flag.BoolVar(&debug, "d", false, "verbose debug log")
+	flag.StringVar(&vScrnDefFile, "f", "", "virtual-screen-def.json file Path")
 
-type LocalCommandGenerator interface {
-	Start(reqChan chan LocalCommandReq, respChan chan LocalCommandReq)
-	GenerateLocalCommandReq(*ula.ApplyCommandData, *ula.NodePixelScreens) ([]*LocalCommandReq, error)
+	flag.Parse()
+
+	if verbose == true {
+		ILog.SetOutput(os.Stderr)
+	}
+
+	if debug == true {
+		DLog.SetOutput(os.Stderr)
+	}
+
+	err := dwmapi.DwmServerInit(vScrnDefFile)
+	if err != nil {
+		ELog.Printf("Failed to Init Dwm Server: %s\n", err)
+		return
+	}
 }

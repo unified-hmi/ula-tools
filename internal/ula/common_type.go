@@ -19,6 +19,13 @@ package ula
 
 const VSCRNDEF_FILE = "/etc/uhmi-framework/virtual-screen-def.json"
 
+type Coord int
+
+const (
+	COORD_GLOBAL Coord = iota
+	COORD_VDISPLAY
+)
+
 type VirtualDisplay struct {
 	DispName   string
 	VDisplayId int
@@ -27,18 +34,6 @@ type VirtualDisplay struct {
 	VirtualW   int
 	VirtualH   int
 }
-
-func (vdsp *VirtualDisplay) Dup() *VirtualDisplay {
-	copied := *vdsp
-	return &copied
-}
-
-type Coord int
-
-const (
-	COORD_GLOBAL Coord = iota
-	COORD_VDISPLAY
-)
 
 type VirtualSurface struct {
 	AppName string
@@ -62,18 +57,13 @@ type VirtualSurface struct {
 	Visibility int
 }
 
-func (sVsurf *VirtualSurface) Dup() *VirtualSurface {
-	copied := *sVsurf
-	return &copied
-}
-
 type VirtualLayer struct {
 	AppName string
 
 	VID int
 
 	Coord      Coord
-	VDisplayId int
+	VDisplayId int /* only used if COORD is COORD_VDISPLAY */
 
 	VirtualW int
 	VirtualH int
@@ -93,26 +83,9 @@ type VirtualLayer struct {
 	Vsurfaces []VirtualSurface
 }
 
-func (sVlayer *VirtualLayer) Dup() *VirtualLayer {
-
-	copiedVLayer := *sVlayer
-	copiedVLayer.Vsurfaces = make([]VirtualSurface, 0)
-
-	for _, sVsurf := range sVlayer.Vsurfaces {
-		copiedVLayer.Vsurfaces = append(copiedVLayer.Vsurfaces, *sVsurf.Dup())
-	}
-
-	return &copiedVLayer
-}
-
 type VirtualSafetyArea struct {
 	VirtualX int
 	VirtualY int
 	VirtualW int
 	VirtualH int
-}
-
-func (vsaftyarea *VirtualSafetyArea) Dup() *VirtualSafetyArea {
-	copied := *vsaftyarea
-	return &copied
 }

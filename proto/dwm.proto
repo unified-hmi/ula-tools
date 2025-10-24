@@ -15,27 +15,22 @@
  * limitations under the License.
  */
 
-package ulanode
+syntax = "proto3";
 
-import (
-	"ula-tools/internal/ula"
-)
+package dwm;
+option go_package = "grpc/dwm;dwm";
 
-type RdisplayCommandData struct {
-	Rdisplay    ula.RealDisplay
-	InsertOrder string
-	ReferenceId int
-	Players     []ula.PixelLayer
-	SafetyAreas []ula.PixelSafetyArea
+service DwmService {
+    rpc DwmSetSystemLayout(Empty) returns (Response);
+    rpc DwmSetLayoutCommand(SetLayoutCommandRequest) returns (Response);
 }
 
-type LocalCommandReq struct {
-	Command string
-	RDComms []RdisplayCommandData
-	Ret     int
+message Empty {}
+
+message SetLayoutCommandRequest {
+    string layout_command = 1;
 }
 
-type LocalCommandGenerator interface {
-	Start(reqChan chan LocalCommandReq, respChan chan LocalCommandReq)
-	GenerateLocalCommandReq(*ula.ApplyCommandData, *ula.NodePixelScreens) ([]*LocalCommandReq, error)
+message Response {
+    string status = 1;
 }

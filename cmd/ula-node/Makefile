@@ -35,16 +35,14 @@ ULANODESO?=libulanode.so
 ULANODEH?=libulanode.h
 INSTALL_LIBDIR?=$(GOPATH)/pkg/libulanode
 
-
 .PHONY: linuxulanodelib        
 linuxulanodelib:
 	set -e ; \
         GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=1 CC=${CC} $(GO) build -buildmode=c-shared -o $(ULANODESO) $(GOBUILDFLAGS) -ldflags '-extldflags "-Wl,-soname=$(ULANODESO)"' . ; \
-        install -o $(USER) -g $(USER) -m 755 -d $(INSTALL_LIBDIR) ; \
-        install -o $(USER) -g $(USER) -m 664 $(ULANODESO) $(INSTALL_LIBDIR)/$(ULANODESO) ; \
-        install -o $(USER) -g $(USER) -m 664 $(ULANODEH) $(INSTALL_LIBDIR)/$(ULANODEH) ; \
+        install -m 755 -d $(INSTALL_LIBDIR) ; \
+        install -m 664 $(ULANODESO) $(INSTALL_LIBDIR)/$(ULANODESO) ; \
+        install -m 664 $(ULANODEH) $(INSTALL_LIBDIR)/$(ULANODEH) ; \
         rm $(ULANODESO) $(ULANODEH)
-
 
 P.HONY: all install
 all: install

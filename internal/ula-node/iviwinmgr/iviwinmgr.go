@@ -18,26 +18,35 @@
 package iviwinmgr
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
-	"os"
 	"reflect"
+	"sync"
 	"time"
 	"ula-tools/internal/ula-node"
 	. "ula-tools/internal/ulog"
 )
+
+type iviWinMgr struct {
+	conn     net.Conn
+	sendChan chan string
+	waitChan chan []byte
+	recvChan chan []byte
+}
 
 func retryConnectTarget(sockChan chan net.Conn, stopChan chan struct{}) {
 	for {
 		conn, err := net.Dial("unix", UHMI_IVI_WM_SOCK)
 		if err == nil {
 			sockChan <- conn
-			return
+			break
 		}
+
 		time.Sleep(10 * time.Millisecond)
 
 		select {
@@ -51,7 +60,7 @@ func retryConnectTarget(sockChan chan net.Conn, stopChan chan struct{}) {
 func connectTarget() net.Conn {
 	var conn net.Conn
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	sockChan := make(chan net.Conn, 1)
@@ -76,18 +85,79 @@ func connectTarget() net.Conn {
 	return conn
 }
 
+func connectTargetOnce() net.Conn {
+	var conn net.Conn
+
+	conn, err := net.Dial("unix", UHMI_IVI_WM_SOCK)
+	if err != nil {
+		ELog.Println("Dial cannot connect to uhmi-ivi-wm")
+		return nil
+	}
+
+	DLog.Printf("connect to uhmi-ivi-wm OK\n")
+	return conn
+}
+
+func handleConnectTarget(iviwinmgr *iviWinMgr, isretry bool, wg *sync.WaitGroup) {
+
+	if isretry == true {
+		iviwinmgr.conn = connectTarget()
+	} else {
+		iviwinmgr.conn = connectTargetOnce()
+	}
+
+	if iviwinmgr.conn == nil {
+		wg.Done()
+		return
+	}
+	iviwinmgr.waitChan = make(chan []byte, 1)
+	iviwinmgr.sendChan = make(chan string, 1)
+	iviwinmgr.recvChan = make(chan []byte, 1)
+
+	defer func() {
+		iviwinmgr.conn.Close()
+		iviwinmgr.conn = nil
+		close(iviwinmgr.waitChan)
+		close(iviwinmgr.sendChan)
+		close(iviwinmgr.recvChan)
+	}()
+
+	go connReadLoop(iviwinmgr.conn, iviwinmgr.recvChan)
+	wg.Done()
+
+	for {
+		select {
+		case recvMsg := <-iviwinmgr.recvChan:
+			if recvMsg != nil {
+				iviwinmgr.waitChan <- recvMsg
+			} else {
+				iviwinmgr.waitChan <- nil
+				return
+			}
+		}
+	}
+}
+
 func (plugin IviPlugin) Start(reqChan chan ulanode.LocalCommandReq, respChan chan ulanode.LocalCommandReq) {
 
-	conn := connectTarget()
-	if conn != nil {
-		defer conn.Close()
-	} else {
-		os.Exit(1)
-	}
+	var wg sync.WaitGroup
+	var iviwinmgr iviWinMgr
+	wg.Add(1)
+	isRetry := true
+	go handleConnectTarget(&iviwinmgr, isRetry, &wg)
+	wg.Wait()
+
 	for {
 		select {
 		case wVDsp := <-reqChan:
-			ret := sendUhmiIviWmJson(conn, wVDsp)
+			if iviwinmgr.conn == nil {
+				wg.Add(1)
+				isRetry = false
+				go handleConnectTarget(&iviwinmgr, isRetry, &wg)
+				wg.Wait()
+			}
+
+			ret := sendUhmiIviWmJson(&iviwinmgr, wVDsp)
 			lcr := ulanode.LocalCommandReq{}
 			lcr.Ret = ret
 			respChan <- lcr
@@ -97,133 +167,29 @@ func (plugin IviPlugin) Start(reqChan chan ulanode.LocalCommandReq, respChan cha
 
 }
 
-func genInitialScreenProtocolJson(req ulanode.LocalCommandReq) (string, error) {
-	var iviRDisp []IviRDisplay
+func sendMagicCode(iviwinmgr *iviWinMgr) error {
 
-	for _, rdcomm := range req.RDComms {
+	n, err := iviwinmgr.conn.Write(MAGIC_CODE)
+	if err != nil || n == 0 {
+		return errors.New(fmt.Sprintf("Write error: %s \n", err))
+	}
 
-		var ivilayers []IviLayerJson
-
-		for _, player := range rdcomm.Players {
-
-			var ivisurfs []IviSurfaceJson
-
-			for _, psurf := range player.Psurfaces {
-
-				iviSurf := IviSurfaceJson{
-					Id:         psurf.VID,
-					Width:      psurf.PixelW,
-					Height:     psurf.PixelH,
-					SrcX:       psurf.PsrcX,
-					SrcY:       psurf.PsrcY,
-					SrcW:       psurf.PsrcW,
-					SrcH:       psurf.PsrcH,
-					DstX:       psurf.PdstX,
-					DstY:       psurf.PdstY,
-					DstW:       psurf.PdstW,
-					DstH:       psurf.PdstH,
-					Opacity:    OPACITY,
-					Visibility: psurf.Visibility,
-				}
-
-				ivisurfs = append(ivisurfs, iviSurf)
+	select {
+	case result := <-iviwinmgr.waitChan:
+		if result != nil {
+			if reflect.DeepEqual(result, MAGIC_CODE) == false {
+				return errors.New(fmt.Sprintf("Read magic code false: %s\n", result))
 			}
-
-			iviLayer := IviLayerJson{
-				Id:         player.VID,
-				Width:      player.PixelW,
-				Height:     player.PixelH,
-				SrcX:       player.PsrcX,
-				SrcY:       player.PsrcY,
-				SrcW:       player.PsrcW,
-				SrcH:       player.PsrcH,
-				DstX:       player.PdstX,
-				DstY:       player.PdstY,
-				DstW:       player.PdstW,
-				DstH:       player.PdstH,
-				Opacity:    OPACITY,
-				Visibility: player.Visibility,
-				Surface:    ivisurfs,
-			}
-
-			ivilayers = append(ivilayers, iviLayer)
+			return nil
+		} else {
+			return errors.New(fmt.Sprintf("Read error: %s \n", err))
 		}
-
-		rdisp := IviRDisplay{
-			RDisplayId: rdcomm.Rdisplay.RDisplayId,
-			Layers:     ivilayers,
-		}
-
-		iviRDisp = append(iviRDisp, rdisp)
 	}
-
-	iviProto := InitialScreenProtocol{
-		Version:  VERSION,
-		Command:  "initial_screen",
-		RDisplay: iviRDisp,
-	}
-
-	jsonBytes, err := json.Marshal(iviProto)
-	if err != nil {
-		ELog.Println("JSON Marshal error:", err)
-	}
-
-	msg := string(jsonBytes)
-
-	return msg, nil
 }
 
-func sendMagicCode(conn net.Conn) error {
+func sendUhmiIviWmJson(iviwinmgr *iviWinMgr, req ulanode.LocalCommandReq) int {
 
-	n, err := conn.Write(MAGIC_CODE)
-	if err != nil || n == 0 {
-		return errors.New(fmt.Sprintf("Write error: %s \n", err))
-	}
-
-	buf := make([]byte, 4)
-	n, err = conn.Read(buf)
-	if err != nil || n == 0 {
-		return errors.New(fmt.Sprintf("Read error: %s \n", err))
-	}
-	if reflect.DeepEqual(buf, MAGIC_CODE) == false {
-		return errors.New(fmt.Sprintf("Read magic code false: %s\n", buf))
-	}
-	DLog.Printf("Read magic code: %s", buf)
-
-	return nil
-}
-
-func sendJsonMsg(conn net.Conn, msg string) error {
-
-	msgLen := uint32(len(msg))
-	size := make([]byte, 4)
-	binary.BigEndian.PutUint32(size, msgLen)
-
-	DLog.Println("Write JSON size:", msgLen)
-	n, err := conn.Write([]byte(size))
-	if err != nil || n == 0 {
-		return errors.New(fmt.Sprintf("Write error: %s \n", err))
-	}
-
-	DLog.Println("Write JSON msg:", msg)
-	n, err = conn.Write([]byte(msg))
-	if err != nil || n == 0 {
-		return errors.New(fmt.Sprintf("Write error: %s \n", err))
-	}
-
-	buf := make([]byte, 4)
-	n, err = conn.Read(buf)
-	if err != nil || n == 0 {
-		return errors.New(fmt.Sprintf("Read error: %s \n", err))
-	}
-	ret := binary.BigEndian.Uint32(buf)
-	DLog.Printf("Read ret: %x", ret)
-	return nil
-}
-
-func sendUhmiIviWmJson(conn net.Conn, req ulanode.LocalCommandReq) int {
-
-	DLog.Println("sendUhmiIviWmJson's Command:", req.Command)
+	DLog.Println("sendUhmiIviWmJson's reqCommand:", req.Command)
 
 	msg := ""
 	var err error
@@ -242,22 +208,66 @@ func sendUhmiIviWmJson(conn net.Conn, req ulanode.LocalCommandReq) int {
 		return -1
 	}
 
-	DLog.Println("[iviwinmgr reqChan]", req)
-	if conn == nil {
+	if iviwinmgr.conn == nil {
+		ELog.Printf("Error Not connected to uhmi-ivi-wm")
 		return -1
 	}
 
-	err = sendMagicCode(conn)
+	err = sendMagicCode(iviwinmgr)
 	if err != nil {
-		ELog.Println("Error SendRecv MagicCode")
+		ELog.Printf("Error SendRecv MagicCode: %s", err)
 		return -1
 	}
 
-	err = sendJsonMsg(conn, msg)
+	DLog.Println("sendCommand", req)
+	err = sendCommand(iviwinmgr, msg)
 	if err != nil {
-		ELog.Println("Error SendRecv JsonMsg")
+		ELog.Printf("Error SendCommand: %s", err)
 		return -1
 	}
 
 	return 0
+
+}
+
+func sendCommand(iviwinmgr *iviWinMgr, command string) error {
+
+	msgLen := uint32(len(command))
+	size := make([]byte, 4)
+	binary.BigEndian.PutUint32(size, msgLen)
+
+	n, err := iviwinmgr.conn.Write(size)
+	if err != nil || n == 0 {
+		ELog.Printf("Write DATA Size error: %s \n", err)
+	}
+
+	n, err = iviwinmgr.conn.Write([]byte(command))
+	if err != nil || n == 0 {
+		ELog.Printf("Write error: %s \n", err)
+	}
+
+	select {
+	case result := <-iviwinmgr.waitChan:
+		if result != nil {
+			ret := binary.BigEndian.Uint32(result)
+			DLog.Printf("Read uhmi-ivi-wm ret: %x", ret)
+			return nil
+		} else {
+			return errors.New(fmt.Sprintf("Read uhmi-ivi-wm error \n"))
+		}
+	}
+}
+
+func connReadLoop(conn net.Conn, rcvChan chan []byte) {
+
+	cbio := bufio.NewReader(conn)
+	for {
+		recvBuf := make([]byte, 4)
+		_, err := io.ReadFull(cbio, recvBuf)
+		if err != nil {
+			rcvChan <- nil
+			return
+		}
+		rcvChan <- recvBuf
+	}
 }

@@ -19,28 +19,31 @@ package rvgpuwinmgr
 
 import (
 	"errors"
+	"ula-tools/internal/ula"
 	"ula-tools/internal/ula-node"
 )
 
 type workRvgpu struct {
-	rdisplay     ulanode.RealDisplay
-	players      []ulanode.PixelLayer
-	psafetyareas []ulanode.PixelSafetyArea
+	rdisplay ula.RealDisplay
+
+	/* Geometry is Coordinated by RDisplay  */
+	players      []ula.PixelLayer
+	psafetyareas []ula.PixelSafetyArea
 }
 
 type RvgpuPlugin struct{}
 
-func (plugin RvgpuPlugin) GenerateLocalCommandReq(acdata *ulanode.ApplyCommandData, sps *ulanode.NodePixelScreens, oldSps *ulanode.NodePixelScreens) ([]*ulanode.LocalCommandReq, error) {
+func (plugin RvgpuPlugin) GenerateLocalCommandReq(acdata *ula.ApplyCommandData, sps *ula.NodePixelScreens) ([]*ulanode.LocalCommandReq, error) {
 	ltqs := []*ulanode.LocalCommandReq{}
 
-	wRvgpuMap, err := generateWorkRvgpu(sps.Dup())
+	wRvgpuMap, err := generateWorkRvgpu(acdata.NPScreens.Dup())
 	if err != nil {
 		return ltqs, errors.New("generateWorkRvgpu error")
 	}
 
 	oldwRvgpuMap := make(map[int]workRvgpu)
 	if acdata.Command != "initial_vscreen" {
-		oldwRvgpuMap, err = generateWorkRvgpu(oldSps.Dup())
+		oldwRvgpuMap, err = generateWorkRvgpu(sps.Dup())
 		if err != nil {
 			return ltqs, errors.New("generateWorkRvgpu error")
 		}
@@ -55,15 +58,15 @@ func (plugin RvgpuPlugin) GenerateLocalCommandReq(acdata *ulanode.ApplyCommandDa
 }
 
 func generateWorkRvgpu(
-	spscrns *ulanode.NodePixelScreens) (map[int]workRvgpu, error) {
+	spscrns *ula.NodePixelScreens) (map[int]workRvgpu, error) {
 
 	workRvgpuMap := make(map[int]workRvgpu)
 
 	for _, pscrn := range spscrns.Pscreens {
 		wvdisp := workRvgpu{
 			rdisplay:     *pscrn.Rdisplay.Dup(),
-			players:      ulanode.DupPixelLayerSlice(pscrn.Players),
-			psafetyareas: ulanode.DupPixelSafetyAreaSlice(pscrn.PsafetyAreas),
+			players:      ula.DupPixelLayerSlice(pscrn.Players),
+			psafetyareas: ula.DupPixelSafetyAreaSlice(pscrn.PsafetyAreas),
 		}
 		workRvgpuMap[wvdisp.rdisplay.RDisplayId] = wvdisp
 	}
@@ -104,8 +107,8 @@ func isValidWorkRvgpuMap(wRvgpuMap map[int]workRvgpu) error {
 
 func generateLocalCommandWithSafetyAreas(lcomm string,
 	workRvgpuMap map[int]workRvgpu,
-	pickupPlayersMap map[int][]ulanode.PixelLayer,
-	pickupPSafetyAreasMap map[int][]ulanode.PixelSafetyArea) (*ulanode.LocalCommandReq, error) {
+	pickupPlayersMap map[int][]ula.PixelLayer,
+	pickupPSafetyAreasMap map[int][]ula.PixelSafetyArea) (*ulanode.LocalCommandReq, error) {
 
 	dcomms := make([]ulanode.RdisplayCommandData, 0)
 
@@ -138,8 +141,8 @@ func pickupInitialVScreen(
 	oldwRvgpuMap map[int]workRvgpu) (*ulanode.LocalCommandReq, error) {
 
 	lcomm := ""
-	pickupPlayersMap := make(map[int][]ulanode.PixelLayer, len(wRvgpuMap))
-	pickupPsafetyAreasMap := make(map[int][]ulanode.PixelSafetyArea, len(wRvgpuMap))
+	pickupPlayersMap := make(map[int][]ula.PixelLayer, len(wRvgpuMap))
+	pickupPsafetyAreasMap := make(map[int][]ula.PixelSafetyArea, len(wRvgpuMap))
 
 	for key, wRvgpu := range wRvgpuMap {
 		oldwRvgpu := oldwRvgpuMap[key]
@@ -148,8 +151,8 @@ func pickupInitialVScreen(
 
 		if len(oldwRvgpu.players) == 0 && len(wRvgpu.players) != 0 {
 			lcomm = "initial_vscreen"
-			pickupPlayers = ulanode.DupPixelLayerSlice(wRvgpu.players)
-			pickupPsafetyareas = ulanode.DupPixelSafetyAreaSlice(wRvgpu.psafetyareas)
+			pickupPlayers = ula.DupPixelLayerSlice(wRvgpu.players)
+			pickupPsafetyareas = ula.DupPixelSafetyAreaSlice(wRvgpu.psafetyareas)
 
 			oldwRvgpuMap[key] = wRvgpu
 			pickupPlayersMap[key] = pickupPlayers

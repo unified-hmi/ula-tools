@@ -34,10 +34,11 @@ DOC_MODULES=$(patsubst %,doc-%, $(MODULES))
 
 .PHONY: all install $(INSTALL_MODULES)
 all : install ulaclientlib
-install : $(INSTALL_MODULES)
+install:$(INSTALL_MODULES)
 
 $(INSTALL_MODULES):
 	set -e;\
+	$(MAKE) mod ;\
 	target=`echo $@ | sed -e 's/install-//'`;\
 	make -C $${target} install
 
@@ -81,11 +82,6 @@ $(CLEAN_MODULES):
 	target=`echo $@ | sed -e 's/clean-//'`;\
 	make -C $${target} clean 
 
-.PHONY: ulanodelib
-ulanodelib:
-	set -e;\
-	make GOOS=${GOOS} GOARCH=${GOARCH} CC=${CC} LIBAPI=${LIBAPI} STRIPTARGET=${STRIPTARGET} -C cmd $@
-
 .PHONY: ulaclientlib
 ulaclientlib:
 	set -e;\
@@ -94,8 +90,97 @@ ulaclientlib:
 .PHONY: linuxulanodelib
 linuxulanodelib:
 	set -e;\
-	make GOOS=${GOOS} GOARCH=${GOARCH} CC=${CC} -C cmd $@
+	make GOOS=linux GOARCH=${GOARCH} CC=${CC} -C cmd $@
 
+
+GO_VERSION := $(shell go version | awk '{print $$3}')
+GO_MAJOR_MINOR := $(shell echo "$(GO_VERSION)" | sed -E 's/go([0-9]+)\.([0-9]+).*/\1.\2/')
+
+ifeq ($(GO_MAJOR_MINOR),1.13)
+  GRPC_VERSION := v1.38.1
+  PROTOC_GO_VERSION := v1.31.0
+  PROTOC_GO_GRPC_VERSION := v1.1.0
+else ifeq ($(GO_MAJOR_MINOR),1.14)
+  GRPC_VERSION := v1.38.1
+  PROTOC_GO_VERSION := v1.31.0
+  PROTOC_GO_GRPC_VERSION := v1.2.0
+else ifeq ($(GO_MAJOR_MINOR),1.15)
+  GRPC_VERSION := v1.38.1
+  PROTOC_GO_VERSION := v1.31.0
+  PROTOC_GO_GRPC_VERSION := v1.2.0
+else ifeq ($(GO_MAJOR_MINOR),1.16)
+  GRPC_VERSION := v1.38.1
+  PROTOC_GO_VERSION := v1.31.0
+  PROTOC_GO_GRPC_VERSION := v1.2.0
+else ifeq ($(GO_MAJOR_MINOR),1.17)
+  GRPC_VERSION := v1.57.2
+  PROTOC_GO_VERSION := v1.34.0
+  PROTOC_GO_GRPC_VERSION := v1.3.0
+else ifeq ($(GO_MAJOR_MINOR),1.18)
+  GRPC_VERSION := v1.57.2
+  PROTOC_GO_VERSION := v1.34.0
+  PROTOC_GO_GRPC_VERSION := v1.3.0
+else ifeq ($(GO_MAJOR_MINOR),1.19)
+  GRPC_VERSION := v1.64.1
+  PROTOC_GO_VERSION := v1.34.0
+  PROTOC_GO_GRPC_VERSION := v1.3.0
+else ifeq ($(GO_MAJOR_MINOR),1.20)
+  GRPC_VERSION := v1.64.1
+  PROTOC_GO_VERSION := v1.34.0
+  PROTOC_GO_GRPC_VERSION := v1.3.0
+else ifeq ($(GO_MAJOR_MINOR),1.21)
+  GRPC_VERSION := v1.67.3
+  PROTOC_GO_VERSION := v1.36.0
+  PROTOC_GO_GRPC_VERSION := v1.5.0
+else ifeq ($(GO_MAJOR_MINOR),1.22)
+  GRPC_VERSION := v1.71.3
+  PROTOC_GO_VERSION := v1.36.0
+  PROTOC_GO_GRPC_VERSION := v1.5.0
+else ifeq ($(GO_MAJOR_MINOR),1.23)
+  GRPC_VERSION := v1.73.0
+  PROTOC_GO_VERSION := v1.36.0
+  PROTOC_GO_GRPC_VERSION := v1.5.0
+else
+  GRPC_VERSION := latest
+  PROTOC_GO_VERSION := latest
+  PROTOC_GO_GRPC_VERSION := latest
+endif
+
+ifeq ($(shell echo "$(GO_MAJOR_MINOR) >= 1.16" | bc) ,1)
+  GO_INSTALL_CMD := go install
+else
+  GO_INSTALL_CMD := go get
+  export GO111MODULE=on
+endif
+
+.PHONY: mod
+mod:
+	set -e ;\
+	if [ ! -f go.mod ]; then go mod init ula-tools; fi ;\
+	go get google.golang.org/grpc@${GRPC_VERSION}; \
+	go mod tidy
+
+.PHONY: proto
+proto:
+	set -e ;\
+	protoc --go_out=proto --go-grpc_out=proto proto/dwm.proto ;\
+
+.PHONY: install-protoc-tools
+install-protoc-tools:
+	set -e ;\
+	$(GO_INSTALL_CMD) google.golang.org/grpc/cmd/protoc-gen-go-grpc@${PROTOC_GO_GRPC_VERSION} ;\
+	$(GO_INSTALL_CMD) google.golang.org/protobuf/cmd/protoc-gen-go@${PROTOC_GO_VERSION}
+
+export GO_ULA=/tmp/go-ula
+.PHONY: install-protoc-tools-go1.20
+install-protoc-tools-go1.20:
+	set -e ;\
+	mkdir -p ${GO_ULA} ;\
+	wget -P ${GO_ULA} https://go.dev/dl/go1.20.14.linux-amd64.tar.gz ;\
+	tar -zxvf ${GO_ULA}/go1.20.14.linux-amd64.tar.gz -C ${GO_ULA} ;\
+	${GO_ULA}/go/bin/go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0 ;\
+	${GO_ULA}/go/bin/go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.34.0 ;\
+	rm -rf ${GO_ULA}
 
 ###################
 ### custom build
@@ -125,4 +210,4 @@ custom_all:
 .PHONY: custom_linuxulanodelib
 custom_linuxulanodelib:
 	set -e;\
-	make GOOS=${CUSTOM_GOOS} GOARCH=${CUSTOM_GOARCH} CC=${CUSTOM_CC} linuxulanodelib
+	make GOOS=linux GOARCH=${CUSTOM_GOARCH} CC=${CUSTOM_CC} linuxulanodelib

@@ -19,20 +19,23 @@ package iviwinmgr
 
 import (
 	"errors"
+	"ula-tools/internal/ula"
 	"ula-tools/internal/ula-node"
 )
 
 type workIvi struct {
-	rdisplay ulanode.RealDisplay
-	players  []ulanode.PixelLayer
+	rdisplay ula.RealDisplay
+
+	/* Geometry is Coordinated by RDisplay  */
+	players []ula.PixelLayer
 }
 
 type IviPlugin struct{}
 
-func (plugin IviPlugin) GenerateLocalCommandReq(acdata *ulanode.ApplyCommandData, sps *ulanode.NodePixelScreens, oldSps *ulanode.NodePixelScreens) ([]*ulanode.LocalCommandReq, error) {
+func (plugin IviPlugin) GenerateLocalCommandReq(acdata *ula.ApplyCommandData, sps *ula.NodePixelScreens) ([]*ulanode.LocalCommandReq, error) {
 	ltqs := []*ulanode.LocalCommandReq{}
 
-	splitOldSps, err := splitLayer(oldSps.Dup())
+	splitOldSps, err := splitLayer(sps.Dup())
 	if err != nil {
 		return nil, errors.New("splitLayer error")
 	}
@@ -41,7 +44,7 @@ func (plugin IviPlugin) GenerateLocalCommandReq(acdata *ulanode.ApplyCommandData
 		return nil, errors.New("generateWorkIvi error")
 	}
 
-	splitSps, err := splitLayer(sps.Dup())
+	splitSps, err := splitLayer(acdata.NPScreens.Dup())
 	if err != nil {
 		return nil, errors.New("splitLayer error")
 	}
@@ -59,14 +62,14 @@ func (plugin IviPlugin) GenerateLocalCommandReq(acdata *ulanode.ApplyCommandData
 }
 
 func generateWorkIvi(
-	spscrns *ulanode.NodePixelScreens) (map[int]workIvi, error) {
+	spscrns *ula.NodePixelScreens) (map[int]workIvi, error) {
 
 	workIviMap := make(map[int]workIvi)
 
 	for _, pscrn := range spscrns.Pscreens {
 		wvdisp := workIvi{
 			rdisplay: *pscrn.Rdisplay.Dup(),
-			players:  ulanode.DupPixelLayerSlice(pscrn.Players),
+			players:  ula.DupPixelLayerSlice(pscrn.Players),
 		}
 		workIviMap[wvdisp.rdisplay.RDisplayId] = wvdisp
 	}
@@ -107,7 +110,7 @@ func isValidWorkIviMap(wIviMap map[int]workIvi) error {
 
 func generateLocalCommand(lcomm string,
 	workIviMap map[int]workIvi,
-	pickupPlayersMap map[int][]ulanode.PixelLayer) (*ulanode.LocalCommandReq, error) {
+	pickupPlayersMap map[int][]ula.PixelLayer) (*ulanode.LocalCommandReq, error) {
 
 	dcomms := make([]ulanode.RdisplayCommandData, 0)
 
@@ -139,7 +142,7 @@ func pickupInitialVScreen(
 	oldwIviMap map[int]workIvi) (*ulanode.LocalCommandReq, error) {
 
 	lcomm := ""
-	pickupPlayersMap := make(map[int][]ulanode.PixelLayer, len(wIviMap))
+	pickupPlayersMap := make(map[int][]ula.PixelLayer, len(wIviMap))
 
 	for key, wIvi := range wIviMap {
 		oldwIvi := oldwIviMap[key]
@@ -147,7 +150,7 @@ func pickupInitialVScreen(
 
 		if len(oldwIvi.players) == 0 && len(wIvi.players) != 0 {
 			lcomm = "initial_vscreen"
-			pickupPlayers = ulanode.DupPixelLayerSlice(wIvi.players)
+			pickupPlayers = ula.DupPixelLayerSlice(wIvi.players)
 
 			oldwIviMap[key] = wIvi
 			pickupPlayersMap[key] = pickupPlayers

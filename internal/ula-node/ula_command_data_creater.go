@@ -21,21 +21,30 @@ import (
 	"ula-tools/internal/ula"
 )
 
-type RdisplayCommandData struct {
-	Rdisplay    ula.RealDisplay
-	InsertOrder string
-	ReferenceId int
-	Players     []ula.PixelLayer
-	SafetyAreas []ula.PixelSafetyArea
+func NewRdisplayCommandData(rdisp *ula.RealDisplay, players []ula.PixelLayer) (*RdisplayCommandData, error) {
+
+	dcomm := RdisplayCommandData{
+		Rdisplay: *rdisp.Dup(),
+		Players:  ula.DupPixelLayerSlice(players),
+	}
+
+	return &dcomm, nil
 }
 
-type LocalCommandReq struct {
-	Command string
-	RDComms []RdisplayCommandData
-	Ret     int
+func NewRdisplayCommandDataWithSafetyArea(rdisp *ula.RealDisplay, players []ula.PixelLayer, safetyareas []ula.PixelSafetyArea) (*RdisplayCommandData, error) {
+
+	dcomm := RdisplayCommandData{
+		Rdisplay:    *rdisp.Dup(),
+		Players:     ula.DupPixelLayerSlice(players),
+		SafetyAreas: ula.DupPixelSafetyAreaSlice(safetyareas),
+	}
+
+	return &dcomm, nil
 }
 
-type LocalCommandGenerator interface {
-	Start(reqChan chan LocalCommandReq, respChan chan LocalCommandReq)
-	GenerateLocalCommandReq(*ula.ApplyCommandData, *ula.NodePixelScreens) ([]*LocalCommandReq, error)
+func NewEmptyLocalCommandReq() (*LocalCommandReq, error) {
+
+	ltq := LocalCommandReq{}
+
+	return &ltq, nil
 }

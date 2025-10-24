@@ -37,7 +37,6 @@ import (
 	"ula-tools/internal/ula-node"
 	"ula-tools/internal/ula-node/iviwinmgr"
 	"ula-tools/internal/ula-node/rvgpuwinmgr"
-	"ula-tools/internal/ula-node/vs2rd"
 	. "ula-tools/internal/ulog"
 )
 
@@ -45,96 +44,6 @@ var MAGIC_CODE []byte = []byte{0x55, 0x4C, 0x41, 0x30} // 'ULA0' ascii code
 
 var Mutex struct {
 	sync.Mutex
-}
-
-func isIpv4(ip string) bool {
-	if net.ParseIP(ip) != nil {
-		for i := 0; i < len(ip); i++ {
-			switch ip[i] {
-			case '.':
-				return true
-			case ':':
-				return false
-			}
-		}
-	}
-
-	return false
-}
-
-func getIpv4AddrsOfAllInterfaces() ([]string, error) {
-
-	var ipaddrs []string
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ipaddrs, err
-	}
-
-	for _, i := range ifaces {
-		addrs, err := i.Addrs()
-		if err != nil {
-			continue
-		}
-
-		for _, addr := range addrs {
-			var ip net.IP
-			switch v := addr.(type) {
-			case *net.IPNet:
-				ip = v.IP
-			case *net.IPAddr:
-				ip = v.IP
-			}
-
-			if isIpv4(ip.String()) {
-				ipaddrs = append(ipaddrs, ip.String())
-			}
-		}
-	}
-
-	if len(ipaddrs) == 0 {
-		return ipaddrs, errors.New("Cannot Find Ipv4Addr from Interfaces")
-	} else {
-		return ipaddrs, nil
-	}
-
-}
-
-func getIpAddrByNodeIdAndIpCandidateList(ipAddrs []string, nodeId int, vscrnDef *ula.VScrnDef) (string, error) {
-
-	for _, r := range vscrnDef.Nodes {
-		if nodeId == r.NodeId {
-			for _, ipaddr := range ipAddrs {
-				if ipaddr == r.Ip {
-					return ipaddr, nil
-				}
-			}
-		}
-	}
-
-	return "0.0.0.0", errors.New("The acquired IP address does not exist in VScrnDef json")
-}
-
-func getNodeIdByHostName(hostname string, vscrnDef *ula.VScrnDef) (int, error) {
-
-	for _, r := range vscrnDef.Nodes {
-		if hostname == r.HostName {
-			return r.NodeId, nil
-		}
-	}
-
-	return -1, errors.New("Cannot Find My NodeId from VScrnDef json")
-}
-
-func getPort(nodeId int, vscrnDef *ula.VScrnDef) (int, error) {
-
-	for _, r := range vscrnDef.DistributedWindowSystem.FrameworkNode {
-		if nodeId == r.NodeId {
-			return r.Ula.Port, nil
-		}
-	}
-
-	return -1, errors.New("Cannot Find My Port from VScrnDef json")
 }
 
 func readConnection(conn net.Conn) ([]byte, uint32, error) {
@@ -228,7 +137,6 @@ func readCommandLoop(conn net.Conn, jsonChan chan map[string]interface{}, listen
 }
 
 func processCommandLoop(
-	vscrn *ulanode.VirtualScreen,
 	nodeId int,
 	reqChan chan ulanode.LocalCommandReq,
 	respChan chan ulanode.LocalCommandReq,
@@ -236,23 +144,7 @@ func processCommandLoop(
 	retChansMap map[int]interface{},
 	plugin ulanode.LocalCommandGenerator,
 ) {
-
-	vs2rdConv, err := vs2rd.NewVscreen2RdisplayConverter(vscrn, nodeId)
-	if err != nil {
-		return
-	}
-
-	var vsconv ulanode.GeometoryConverter = vs2rdConv
-	err = vsconv.DoConvert()
-	if err != nil {
-		return
-	}
-
-	spscrns, err := vsconv.GetNodePixelScreens()
-	if err != nil {
-		return
-	}
-
+	spscrns := new(ula.NodePixelScreens)
 	for {
 		var mJson map[string]interface{}
 		select {
@@ -262,44 +154,22 @@ func processCommandLoop(
 
 		ret := 0
 		listenerId := mJson["listener_id"].(int)
-
-		vscrnNew := vscrn.Dup()
-
-		acdata, err := vscrnNew.ApplyCommand(mJson)
+		jsonBytes, err := json.Marshal(mJson)
 		if err != nil {
 			ret = -1
 			commResponseResult(ret, listenerId, retChansMap)
 			continue
 		}
 
-		if acdata.Command == "get_vlayer" {
-			commResponseData(acdata.Vlayers, listenerId, retChansMap)
-			continue
-		}
-
-		vs2rdConv, err := vs2rd.NewVscreen2RdisplayConverter(vscrnNew, nodeId)
+		acdata := new(ula.ApplyCommandData)
+		err = json.Unmarshal(jsonBytes, acdata)
 		if err != nil {
 			ret = -1
 			commResponseResult(ret, listenerId, retChansMap)
 			continue
 		}
 
-		var vsconv ulanode.GeometoryConverter = vs2rdConv
-		err = vsconv.DoConvert()
-		if err != nil {
-			ret = -1
-			commResponseResult(ret, listenerId, retChansMap)
-			continue
-		}
-
-		spscrnsNew, err := vsconv.GetNodePixelScreens()
-		if err != nil {
-			ret = -1
-			commResponseResult(ret, listenerId, retChansMap)
-			continue
-		}
-
-		reqs, err := plugin.GenerateLocalCommandReq(acdata, spscrnsNew, spscrns)
+		reqs, err := plugin.GenerateLocalCommandReq(acdata, spscrns)
 		if err != nil {
 			ret = -1
 			commResponseResult(ret, listenerId, retChansMap)
@@ -308,8 +178,7 @@ func processCommandLoop(
 
 		ret = submitCommand(reqs, reqChan, respChan)
 
-		vscrn = vscrnNew
-		spscrns = spscrnsNew
+		spscrns = acdata.NPScreens
 
 		commResponseResult(ret, listenerId, retChansMap)
 	}
@@ -348,24 +217,8 @@ func commResponseResult(
 	respChan <- retJson
 }
 
-func commResponseData(
-	vlayers []ula.VirtualLayer,
-	listenerId int,
-	retChansMap map[int]interface{},
-) {
-	Mutex.Lock()
-	respChan := retChansMap[listenerId].(chan map[string]interface{})
-	Mutex.Unlock()
-	retJson := map[string]interface{}{
-		"type": "data",
-		"data": vlayers,
-	}
-	respChan <- retJson
-}
-
 func mainLoop(
 	listener net.Listener,
-	vscrn *ulanode.VirtualScreen,
 	nodeId int,
 	reqChan chan ulanode.LocalCommandReq,
 	respChan chan ulanode.LocalCommandReq,
@@ -373,7 +226,7 @@ func mainLoop(
 
 	jsonChan := make(chan map[string]interface{}, 1)
 	retChansMap := make(map[int]interface{})
-	go processCommandLoop(vscrn, nodeId, reqChan, respChan, jsonChan, retChansMap, plugin)
+	go processCommandLoop(nodeId, reqChan, respChan, jsonChan, retChansMap, plugin)
 
 	listenerId := 0
 	for {
@@ -394,7 +247,6 @@ func mainLoop(
 func printUsage() {
 	fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
 	fmt.Fprintf(os.Stderr, "%s [option] | listenIp listenPort nodeId\n", os.Args[0])
-
 	fmt.Fprintf(os.Stderr, "[option]\n")
 	flag.PrintDefaults()
 }
@@ -411,7 +263,7 @@ func main() {
 	)
 
 	flag.BoolVar(&verbose, "v", true, "verbose info log")
-	flag.BoolVar(&debug, "d", true, "verbose debug log")
+	flag.BoolVar(&debug, "d", false, "verbose debug log")
 	flag.StringVar(&vScrnDefFile, "f", "", "virtual-screen-def.json file Path")
 	flag.IntVar(&keyNodeId, "N", -1, "search ula-node param by node_id from VScrnDef file")
 	flag.StringVar(&keyHostName, "H", "", "search ula-node param by hostname from VScrnDef file")
@@ -455,30 +307,32 @@ func main() {
 			}
 		}
 
+		/* search ulaNode Params */
 		if keyNodeId != -1 {
 			nodeId = keyNodeId
 		} else {
-			nodeId, err = getNodeIdByHostName(keyHostName, vscrnDef)
+			nodeId, err = vscrnDef.GetNodeIdByHostName(keyHostName)
 			if err != nil {
-				ELog.Println("getNodeIdByHostName error : ", err)
+				ELog.Println("GetNodeIdByHostName error : ", err)
 				return
 			}
 		}
 
-		ipAddrs, err := getIpv4AddrsOfAllInterfaces()
+		/* search my Ip Addr */
+		ipAddrs, err := ula.GetIpv4AddrsOfAllInterfaces()
 		if err != nil {
-			ELog.Println("getIpv4AddrsOfAllInterfaces error : ", err)
+			ELog.Println("GetIpv4AddrsOfAllInterfaces error : ", err)
 			return
 		}
-		listenIp, err = getIpAddrByNodeIdAndIpCandidateList(ipAddrs, nodeId, vscrnDef)
+		listenIp, err = vscrnDef.GetIpAddrByNodeIdAndIpCandidateList(ipAddrs, nodeId)
 		if err != nil {
-			ELog.Println("getIpAddrByNodeIdAndIpCandidateList error : ", err)
+			ELog.Println("GetIpAddrByNodeIdAndIpCandidateList error : ", err)
 			return
 		}
 
-		listenPort, err = getPort(nodeId, vscrnDef)
+		listenPort, err = vscrnDef.GetPort(nodeId)
 		if err != nil {
-			ELog.Println("getPort error : ", err)
+			ELog.Println("GetPort error : ", err)
 			return
 		}
 	} else if len(flag.Args()) == 3 {
@@ -502,25 +356,18 @@ func main() {
 	}
 
 	defer listener.Close()
-
-	vscrn, err := ulanode.NewVirtualScreen(vscrnDef)
-	if err != nil {
-		ELog.Println("Could not generate initial screen.", err)
-		return
-	}
-
 	reqChan := make(chan ulanode.LocalCommandReq, 5)
 	respChan := make(chan ulanode.LocalCommandReq, 5)
 
 	var plugin ulanode.LocalCommandGenerator
+	plugin = iviwinmgr.IviPlugin{}
+
 	if rvgpuwinmgr.IsRvgpuCompositor(vscrnDef, nodeId) {
 		plugin = rvgpuwinmgr.RvgpuPlugin{}
-	} else {
-		plugin = iviwinmgr.IviPlugin{}
 	}
 	go plugin.Start(reqChan, respChan)
 
-	mainLoop(listener, vscrn, nodeId, reqChan, respChan, plugin)
+	mainLoop(listener, nodeId, reqChan, respChan, plugin)
 }
 
 //export StartUlanode
@@ -538,43 +385,36 @@ func StartUlanode(vScrnDefFile string, keyNodeId int, keyHostName string, keyIpA
 	)
 
 	listenIp = keyIpAddr
-	nodeId, err = getNodeIdByHostName(keyHostName, vscrnDef)
+	nodeId, err = vscrnDef.GetNodeIdByHostName(keyHostName)
 	if err != nil {
-		fmt.Println("getNodeIdByHostName error : ", err)
+		ELog.Println("getNodeIdByHostName error : ", err)
 		return
 	}
 
-	listenPort, err = getPort(nodeId, vscrnDef)
+	listenPort, err = vscrnDef.GetPort(nodeId)
 	if err != nil {
-		fmt.Println("getPort error : ", err)
+		ELog.Println("getPort error : ", err)
 		return
 	}
 
 	listenAddr := listenIp + ":" + strconv.Itoa(listenPort)
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		fmt.Printf("Listen error: %s", err)
+		ELog.Printf("Listen error: %s", err)
 		return
 	}
 
 	defer listener.Close()
-
-	vscrn, err := ulanode.NewVirtualScreen(vscrnDef)
-	if err != nil {
-		ELog.Println("Could not generate initial screen.", err)
-		return
-	}
-
 	reqChan := make(chan ulanode.LocalCommandReq, 5)
 	respChan := make(chan ulanode.LocalCommandReq, 5)
 
 	var plugin ulanode.LocalCommandGenerator
+	plugin = iviwinmgr.IviPlugin{}
+
 	if rvgpuwinmgr.IsRvgpuCompositor(vscrnDef, nodeId) {
 		plugin = rvgpuwinmgr.RvgpuPlugin{}
-	} else {
-		plugin = iviwinmgr.IviPlugin{}
 	}
 	go plugin.Start(reqChan, respChan)
 
-	mainLoop(listener, vscrn, nodeId, reqChan, respChan, plugin)
+	mainLoop(listener, nodeId, reqChan, respChan, plugin)
 }

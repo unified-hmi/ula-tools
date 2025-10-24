@@ -26,14 +26,13 @@ ULACLIENTSO?=libulaclient.so
 ULACLIENTH?=libulaclient.h
 INSTALL_LIBDIR?=$(GOPATH)/pkg/libulaclient
 
-
 .PHONY: ulaclientlib
 ulaclientlib:
 	set -e ; \
 	GOOS=${GOOS} GOARCH=${GOARCH} CGO_ENABLED=1 CC=${CC} $(GO) build -buildmode=c-shared -o $(ULACLIENTSO) $(GOBUILDFLAGS) -ldflags '-extldflags "-Wl,-soname=$(ULACLIENTSO)"' . ; \
-	install -o $(USER) -g $(USER) -m 755 -d $(INSTALL_LIBDIR) ; \
-	install -o $(USER) -g $(USER) -m 664 $(ULACLIENTSO) $(INSTALL_LIBDIR)/$(ULACLIENTSO) ; \
-	install -o $(USER) -g $(USER) -m 664 $(ULACLIENTH) $(INSTALL_LIBDIR)/$(ULACLIENTH) ; \
+	install -m 755 -d $(INSTALL_LIBDIR) ; \
+	install -m 664 $(ULACLIENTSO) $(INSTALL_LIBDIR)/$(ULACLIENTSO) ; \
+	install -m 664 $(ULACLIENTH) $(INSTALL_LIBDIR)/$(ULACLIENTH) ; \
 	rm $(ULACLIENTSO) $(ULACLIENTH)
 
 .PHONY: test

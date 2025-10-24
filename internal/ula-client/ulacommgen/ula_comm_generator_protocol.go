@@ -53,6 +53,7 @@ type UPIVlayer struct {
 }
 
 type UPIVscreen struct {
-	Command string      `json:"command"`
-	Layer   []UPIVlayer `json:"vlayer"`
+	Command string        `json:"command"`
+	Layer   []UPIVlayer   `json:"vlayer"`
+	Surface []UPIVsurface `json:"vsurface"`
 }
